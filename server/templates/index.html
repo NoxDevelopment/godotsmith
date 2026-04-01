@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Godotsmith IDE</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="app">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1>Godotsmith</h1>
+            <div class="subtitle">Game Forge IDE</div>
+        </div>
+        <div class="sidebar-nav">
+            <div class="nav-item active" onclick="showPage('projects')">
+                <span class="icon">&#128190;</span><span>My Projects</span>
+            </div>
+            <div class="nav-item" onclick="showPage('new-game')">
+                <span class="icon">&#10010;</span><span>New Game</span>
+            </div>
+            <div class="nav-item" onclick="showPage('console')">
+                <span class="icon">&#9000;</span><span>Console</span>
+            </div>
+            <div class="nav-item" onclick="showPage('settings')">
+                <span class="icon">&#9881;</span><span>Settings</span>
+            </div>
+        </div>
+        <div class="sidebar-services" id="services-panel">
+            <div class="service-line"><span class="service-dot offline" id="svc-comfyui"></span>ComfyUI</div>
+            <div class="service-line"><span class="service-dot offline" id="svc-kokoro"></span>Kokoro TTS</div>
+            <div class="service-line"><span class="service-dot offline" id="svc-godot"></span>Godot</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Projects Page -->
+        <div class="page active" id="page-projects">
+            <div class="page-header">My Projects</div>
+            <div id="project-list"></div>
+        </div>
+
+        <!-- Project Detail Page -->
+        <div class="page" id="page-detail">
+            <div class="detail-header">
+                <div>
+                    <span class="btn btn-outline btn-sm" onclick="showPage('projects')">&larr; Back</span>
+                    <span id="detail-name" style="font-size:20px; font-weight:600; margin-left:12px;"></span>
+                </div>
+                <div class="actions" id="detail-actions"></div>
+            </div>
+            <div class="detail-tabs">
+                <div class="detail-tab active" onclick="showDetailTab('design')">Design Doc</div>
+                <div class="detail-tab" onclick="showDetailTab('plan')">Build Plan</div>
+                <div class="detail-tab" onclick="showDetailTab('assets')">Assets</div>
+                <div class="detail-tab" onclick="showDetailTab('audio')">Audio</div>
+                <div class="detail-tab" onclick="showDetailTab('screenshots')">Screenshots</div>
+            </div>
+            <div class="detail-panel active" id="panel-design">
+                <div class="doc-view" id="design-doc"></div>
+            </div>
+            <div class="detail-panel" id="panel-plan">
+                <div id="plan-tasks"></div>
+            </div>
+            <div class="detail-panel" id="panel-assets">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <span style="font-size:16px; font-weight:600;">Images</span>
+                    <button class="btn btn-accent btn-sm" onclick="showRegenModal()">+ Generate Asset</button>
+                </div>
+                <div class="asset-grid" id="asset-images"></div>
+            </div>
+            <div class="detail-panel" id="panel-audio">
+                <span style="font-size:16px; font-weight:600;">Audio Files</span>
+                <div id="audio-list" style="margin-top:12px;"></div>
+            </div>
+            <div class="detail-panel" id="panel-screenshots">
+                <span style="font-size:16px; font-weight:600;">Screenshots</span>
+                <div class="asset-grid" id="screenshot-grid" style="margin-top:12px;"></div>
+            </div>
+        </div>
+
+        <!-- New Game Page -->
+        <div class="page" id="page-new-game">
+            <div class="page-header">Create a New Game</div>
+            <div class="page-subheader">Choose a template or start from scratch. Supports Godot, Unity, and Unreal Engine.</div>
+
+            <div style="margin-bottom:20px;">
+                <label style="font-size:14px; font-weight:600; margin-bottom:8px; display:block;">Game Engine</label>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-accent engine-btn" data-engine="godot" onclick="selectEngine('godot')">Godot 4.6</button>
+                    <button class="btn btn-outline engine-btn" data-engine="unity" onclick="selectEngine('unity')">Unity</button>
+                    <button class="btn btn-outline engine-btn" data-engine="unreal" onclick="selectEngine('unreal')">Unreal Engine</button>
+                </div>
+            </div>
+
+            <label style="font-size:14px; font-weight:600; margin-bottom:8px; display:block;">Start from Template</label>
+            <div class="template-grid" id="template-grid"></div>
+
+            <div style="margin-top:24px; max-width:700px;">
+                <div class="form-group">
+                    <label>Game Name *</label>
+                    <input class="form-input" id="f-name" placeholder="My Awesome Game">
+                </div>
+                <div class="form-group">
+                    <label>Genre</label>
+                    <input class="form-input" id="f-genre">
+                </div>
+                <div class="form-group">
+                    <label>Concept (1-3 sentences)</label>
+                    <textarea class="form-input" id="f-concept" rows="3" placeholder="Describe your game idea..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Art Style</label>
+                    <input class="form-input" id="f-style" placeholder="e.g., 16-bit pixel art, low-poly 3D">
+                </div>
+                <div class="form-group">
+                    <label>Core Mechanics (one per line)</label>
+                    <textarea class="form-input" id="f-mechanics" rows="4"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Player Character</label>
+                    <input class="form-input" id="f-player">
+                </div>
+                <div class="form-group">
+                    <label>Win Condition</label>
+                    <input class="form-input" id="f-goal">
+                </div>
+                <div class="form-group">
+                    <label>Enemies / Obstacles</label>
+                    <input class="form-input" id="f-enemies">
+                </div>
+                <div class="form-group">
+                    <label>Special Features (optional)</label>
+                    <textarea class="form-input" id="f-special" rows="2"></textarea>
+                </div>
+                <div style="margin-top:16px; display:flex; gap:10px;">
+                    <button class="btn btn-accent" onclick="createProject()" style="font-size:15px; padding:12px 24px;">Create & Launch</button>
+                    <button class="btn btn-outline" onclick="clearForm()">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Console Page -->
+        <div class="page" id="page-console">
+            <div class="page-header">Console</div>
+            <div class="console-container">
+                <div class="console-output" id="console-output"></div>
+                <div class="console-input-row">
+                    <input id="console-input" placeholder="Type a command..." onkeydown="if(event.key==='Enter')sendConsole()">
+                    <button class="btn btn-blue" onclick="sendConsole()">Send</button>
+                    <button class="btn btn-red" onclick="stopConsole()">Stop</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Page -->
+        <div class="page" id="page-settings">
+            <div class="page-header">Settings</div>
+            <div style="max-width:600px;">
+                <div class="form-group">
+                    <label>Projects Root Folder</label>
+                    <input class="form-input" id="s-projects_root">
+                </div>
+                <div class="form-group">
+                    <label>ComfyUI Install Path</label>
+                    <input class="form-input" id="s-comfyui_path">
+                </div>
+                <div class="form-group">
+                    <label>ComfyUI Port</label>
+                    <input class="form-input" id="s-comfyui_port" type="number">
+                </div>
+                <div class="form-group">
+                    <label>Godot Executable</label>
+                    <input class="form-input" id="s-godot_exe">
+                </div>
+                <div class="form-group">
+                    <label>Unity Executable (optional)</label>
+                    <input class="form-input" id="s-unity_exe" placeholder="Path to Unity.exe">
+                </div>
+                <div class="form-group">
+                    <label>Unreal Executable (optional)</label>
+                    <input class="form-input" id="s-unreal_exe" placeholder="Path to UnrealEditor.exe">
+                </div>
+                <div class="form-group">
+                    <label>Kokoro TTS Port</label>
+                    <input class="form-input" id="s-kokoro_port" type="number">
+                </div>
+                <div class="form-group">
+                    <label>Claude Model</label>
+                    <select class="form-input" id="s-claude_model">
+                        <option value="opus">Opus (most capable)</option>
+                        <option value="sonnet">Sonnet (faster)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top:16px;">
+                    <label><input type="checkbox" id="s-auto_approve"> Auto-Approve Agent Actions</label>
+                    <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                        Runs Claude Code with --dangerously-skip-permissions. No confirmation prompts.
+                    </div>
+                </div>
+                <button class="btn btn-accent" onclick="saveSettings()" style="margin-top:16px;">Save Settings</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// --- State ---
+let currentProject = null;
+let selectedEngine = 'godot';
+let selectedTemplate = null;
+let ws = null;
+
+// --- Navigation ---
+function showPage(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('page-' + name).classList.add('active');
+    document.querySelector(`.nav-item[onclick*="${name}"]`)?.classList.add('active');
+    if (name === 'projects') loadProjects();
+    if (name === 'settings') loadSettings();
+    if (name === 'new-game') loadTemplates();
+}
+
+function showDetailTab(name) {
+    document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.detail-panel').forEach(p => p.classList.remove('active'));
+    document.querySelector(`.detail-tab[onclick*="${name}"]`).classList.add('active');
+    document.getElementById('panel-' + name).classList.add('active');
+}
+
+// --- Projects ---
+async function loadProjects() {
+    const res = await fetch('/api/projects');
+    const projects = await res.json();
+    const list = document.getElementById('project-list');
+    if (!projects.length) {
+        list.innerHTML = '<div style="color:var(--text-dim); padding:40px; text-align:center;">No projects yet. Create one in "New Game"!</div>';
+        return;
+    }
+    list.innerHTML = projects.map(p => `
+        <div class="project-card" onclick="openProject('${p.path.replace(/\\/g, '\\\\')}')">
+            <div>
+                <span class="name">${p.name}</span>
+                <span class="engine-badge ${p.engine || 'godot'}">${(p.engine || 'godot').toUpperCase()}</span>
+                ${p.genre ? `<span class="genre">${p.genre}</span>` : ''}
+            </div>
+            <div class="path">${p.path}</div>
+            ${p.concept ? `<div class="concept">${p.concept.substring(0, 150)}${p.concept.length > 150 ? '...' : ''}</div>` : ''}
+            <div class="actions">
+                <button class="btn btn-accent btn-sm" onclick="event.stopPropagation(); launch('claude', '${p.path.replace(/\\/g, '\\\\')}')">Claude Code</button>
+                <button class="btn btn-blue btn-sm" onclick="event.stopPropagation(); launch('godot-editor', '${p.path.replace(/\\/g, '\\\\')}')">Godot Editor</button>
+                <button class="btn btn-blue btn-sm" onclick="event.stopPropagation(); launch('godot-run', '${p.path.replace(/\\/g, '\\\\')}')">Run Game</button>
+                <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); launch('folder', '${p.path.replace(/\\/g, '\\\\')}')">Folder</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function openProject(path) {
+    currentProject = path;
+    const res = await fetch('/api/project/' + encodeURIComponent(path));
+    const detail = await res.json();
+
+    document.getElementById('detail-name').textContent = path.split(/[/\\]/).pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    document.getElementById('detail-actions').innerHTML = `
+        <button class="btn btn-accent btn-sm" onclick="launch('claude', '${path.replace(/\\/g, '\\\\')}')">Claude Code</button>
+        <button class="btn btn-blue btn-sm" onclick="launch('godot-editor', '${path.replace(/\\/g, '\\\\')}')">Godot</button>
+        <button class="btn btn-blue btn-sm" onclick="launch('godot-run', '${path.replace(/\\/g, '\\\\')}')">Run</button>
+    `;
+
+    // Design doc
+    const doc = detail.game_prompt_md || detail.plan_md || 'No design document found.';
+    document.getElementById('design-doc').textContent = doc;
+
+    // Plan tasks
+    const tasks = detail.tasks || [];
+    document.getElementById('plan-tasks').innerHTML = tasks.length ? tasks.map(t => `
+        <div class="task-item">
+            <div class="task-status ${t.status.replace(/\s/g, '_')}"></div>
+            <div class="task-title">${t.title}</div>
+        </div>
+    `).join('') : '<div style="color:var(--text-dim); padding:20px;">No build plan yet. Run Claude Code to generate one.</div>';
+
+    // Assets
+    const images = (detail.assets?.images || []);
+    document.getElementById('asset-images').innerHTML = images.length ? images.map(a => `
+        <div class="asset-thumb" onclick="window.open('/api/asset/${encodeURIComponent(a.path)}')">
+            <img src="/api/asset/${encodeURIComponent(a.path)}" loading="lazy" alt="${a.name}">
+            <div class="aname">${a.name}</div>
+        </div>
+    `).join('') : '<div style="color:var(--text-dim);">No images generated yet.</div>';
+
+    // Audio
+    const audio = (detail.assets?.audio || []);
+    document.getElementById('audio-list').innerHTML = audio.length ? audio.map(a => `
+        <div class="audio-item">
+            <div class="aname">${a.name}</div>
+            <audio controls preload="none" src="/api/asset/${encodeURIComponent(a.path)}"></audio>
+            <span style="font-size:11px; color:var(--text-muted);">${(a.size/1024).toFixed(0)}KB</span>
+        </div>
+    `).join('') : '<div style="color:var(--text-dim);">No audio files yet.</div>';
+
+    // Screenshots
+    const screenshots = (detail.screenshots || []);
+    document.getElementById('screenshot-grid').innerHTML = screenshots.length ? screenshots.map(s => `
+        <div class="asset-thumb">
+            <img src="/api/asset/${encodeURIComponent(s.path)}" loading="lazy" alt="${s.name}">
+            <div class="aname">${s.folder}/${s.name}</div>
+        </div>
+    `).join('') : '<div style="color:var(--text-dim);">No screenshots yet.</div>';
+
+    showPage('detail');
+    showDetailTab('design');
+}
+
+// --- New Game ---
+function selectEngine(engine) {
+    selectedEngine = engine;
+    document.querySelectorAll('.engine-btn').forEach(b => {
+        b.className = b.dataset.engine === engine ? 'btn btn-accent engine-btn' : 'btn btn-outline engine-btn';
+    });
+    loadTemplates();
+}
+
+async function loadTemplates() {
+    const res = await fetch('/api/templates');
+    const templates = await res.json();
+    const grid = document.getElementById('template-grid');
+    grid.innerHTML = Object.entries(templates)
+        .filter(([_, t]) => t.engines.includes(selectedEngine))
+        .map(([id, t]) => `
+        <div class="template-card ${selectedTemplate === id ? 'selected' : ''}" onclick="selectTemplate('${id}', ${JSON.stringify(t).replace(/"/g, '&quot;')})">
+            <div class="tname">${t.name}</div>
+            <div class="tdesc">${t.description}</div>
+            <div class="engines">${t.engines.map(e => `<span>${e}</span>`).join('')}</div>
+        </div>
+    `).join('');
+}
+
+function selectTemplate(id, template) {
+    selectedTemplate = id;
+    document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+    document.querySelector(`.template-card[onclick*="${id}"]`)?.classList.add('selected');
+    // Fill form from template
+    document.getElementById('f-genre').value = template.genre || '';
+    document.getElementById('f-mechanics').value = template.mechanics || '';
+    document.getElementById('f-style').value = template.style || '';
+}
+
+async function createProject() {
+    const name = document.getElementById('f-name').value.trim();
+    if (!name) { alert('Enter a game name'); return; }
+
+    const data = {
+        name, engine: selectedEngine,
+        genre: document.getElementById('f-genre').value,
+        concept: document.getElementById('f-concept').value,
+        style: document.getElementById('f-style').value,
+        mechanics: document.getElementById('f-mechanics').value,
+        player: document.getElementById('f-player').value,
+        goal: document.getElementById('f-goal').value,
+        enemies: document.getElementById('f-enemies').value,
+        special: document.getElementById('f-special').value,
+    };
+
+    const res = await fetch('/api/projects/create', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (result.ok) {
+        appendConsole('=== Project created: ' + name + ' ===\n' + result.prompt + '\n');
+        showPage('projects');
+        launch('claude', result.path);
+    } else {
+        alert(result.error || 'Failed');
+    }
+}
+
+function clearForm() {
+    ['name','genre','concept','style','mechanics','player','goal','enemies','special'].forEach(f => {
+        document.getElementById('f-' + f).value = '';
+    });
+    selectedTemplate = null;
+    document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+}
+
+// --- Console ---
+function appendConsole(text) {
+    const out = document.getElementById('console-output');
+    out.textContent += text;
+    out.scrollTop = out.scrollHeight;
+}
+
+function sendConsole() {
+    const input = document.getElementById('console-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    appendConsole('> ' + text + '\n');
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({type: 'input', data: text}));
+    }
+}
+
+function stopConsole() {
+    if (ws) { ws.send(JSON.stringify({type: 'stop'})); ws.close(); ws = null; }
+    appendConsole('\n[Stopped]\n');
+}
+
+// --- Launch ---
+async function launch(action, path) {
+    await fetch('/api/launch/' + action, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path})
+    });
+}
+
+// --- Settings ---
+async function loadSettings() {
+    const res = await fetch('/api/settings');
+    const cfg = await res.json();
+    ['projects_root','comfyui_path','comfyui_port','godot_exe','unity_exe','unreal_exe','kokoro_port','claude_model'].forEach(k => {
+        const el = document.getElementById('s-' + k);
+        if (el) el.value = cfg[k] || '';
+    });
+    document.getElementById('s-auto_approve').checked = cfg.auto_approve || false;
+}
+
+async function saveSettings() {
+    const cfg = {};
+    ['projects_root','comfyui_path','godot_exe','unity_exe','unreal_exe','claude_model'].forEach(k => {
+        cfg[k] = document.getElementById('s-' + k).value;
+    });
+    cfg.comfyui_port = parseInt(document.getElementById('s-comfyui_port').value) || 8188;
+    cfg.kokoro_port = parseInt(document.getElementById('s-kokoro_port').value) || 8880;
+    cfg.auto_approve = document.getElementById('s-auto_approve').checked;
+
+    await fetch('/api/settings', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(cfg)
+    });
+    checkServices();
+    alert('Settings saved!');
+}
+
+// --- Services ---
+async function checkServices() {
+    const res = await fetch('/api/services');
+    const svc = await res.json();
+    document.getElementById('svc-comfyui').className = 'service-dot ' + (svc.comfyui.online ? 'online' : 'offline');
+    document.getElementById('svc-kokoro').className = 'service-dot ' + (svc.kokoro.online ? 'online' : 'offline');
+    document.getElementById('svc-godot').className = 'service-dot ' + (svc.godot.available ? 'online' : 'offline');
+}
+
+// --- Init ---
+loadProjects();
+checkServices();
+setInterval(checkServices, 15000);
+</script>
+</body>
+</html>
