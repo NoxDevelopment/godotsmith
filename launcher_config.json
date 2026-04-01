@@ -1,0 +1,13 @@
+{
+  "projects_root": "C:/code/ai/game dev",
+  "comfyui_path": "C:/code/ai/localllm_poc/ComfyUI",
+  "comfyui_port": 8188,
+  "godot_exe": "godot",
+  "unity_exe": "",
+  "unreal_exe": "",
+  "kokoro_port": 8880,
+  "auto_approve": true,
+  "claude_model": "opus",
+  "host": "0.0.0.0",
+  "port": 7777
+}

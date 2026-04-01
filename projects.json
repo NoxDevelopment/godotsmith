@@ -1,24 +1,18 @@
 [
   {
     "name": "New Excitebike",
-    "path": "C:\\code\\ai\\new-excitebike",
-    "genre": "side scrolling motorcycle platformer",
-    "concept": "Picture the NES game excitebike, I want that, with a course designer, similar aesthetic, levels, multiplayer locally and across local network.",
-    "created": "2026-04-01T08:37:29.838984",
-    "last_opened": "2026-04-01T08:37:29.975928"
-  },
-  {
-    "name": "Godotsmith",
-    "path": "C:\\code\\ai\\godotsmith",
-    "genre": "Unknown",
+    "path": "C:\\code\\ai\\game dev\\new-excitebike",
+    "engine": "godot",
+    "genre": "",
     "concept": "",
-    "created": "2026-03-22T16:55:31.970102",
-    "last_opened": "2026-04-01T08:17:25.927443"
+    "created": "2026-04-01T08:37:24.393231",
+    "last_opened": "2026-04-01T10:33:50.645061"
   },
   {
     "name": "Primordial",
-    "path": "C:\\code\\ai\\primordial",
-    "genre": "Unknown",
+    "path": "C:\\code\\ai\\game dev\\primordial",
+    "engine": "godot",
+    "genre": "",
     "concept": "",
     "created": "2026-03-22T20:18:38.277006",
     "last_opened": "2026-03-23T20:31:15.340235"

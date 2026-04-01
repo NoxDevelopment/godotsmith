@@ -21,6 +21,9 @@
             <div class="nav-item" onclick="showPage('new-game')">
                 <span class="icon">&#10010;</span><span>New Game</span>
             </div>
+            <div class="nav-item" onclick="showPage('store')">
+                <span class="icon">&#128230;</span><span>Asset Store</span>
+            </div>
             <div class="nav-item" onclick="showPage('console')">
                 <span class="icon">&#9000;</span><span>Console</span>
             </div>
@@ -140,6 +143,41 @@
                     <button class="btn btn-accent" onclick="createProject()" style="font-size:15px; padding:12px 24px;">Create & Launch</button>
                     <button class="btn btn-outline" onclick="clearForm()">Clear</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Asset Store Page -->
+        <div class="page" id="page-store">
+            <div class="page-header">Godot Asset Store</div>
+            <div class="page-subheader">Browse templates, tools, and plugins from the official Godot Asset Library. Install directly into your projects.</div>
+            <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+                <input class="form-input" id="store-search" placeholder="Search assets..." style="max-width:300px;"
+                       onkeydown="if(event.key==='Enter')searchStore()">
+                <select class="form-input" id="store-category" style="max-width:180px;" onchange="searchStore()">
+                    <option value="0">All Categories</option>
+                    <option value="8">Templates</option>
+                    <option value="1">2D Tools</option>
+                    <option value="2">3D Tools</option>
+                    <option value="4">Tools</option>
+                    <option value="6">Demos</option>
+                    <option value="3">Shaders</option>
+                    <option value="5">Materials</option>
+                </select>
+                <select class="form-input" id="store-type" style="max-width:140px;" onchange="searchStore()">
+                    <option value="any">All Types</option>
+                    <option value="project">Projects</option>
+                    <option value="addon">Addons</option>
+                </select>
+                <button class="btn btn-accent" onclick="searchStore()">Search</button>
+            </div>
+            <div id="store-results" class="template-grid"></div>
+            <div id="store-pagination" style="margin-top:16px; text-align:center;"></div>
+        </div>
+
+        <!-- Asset Detail Modal -->
+        <div id="asset-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:100; overflow-y:auto;" onclick="if(event.target===this)closeAssetModal()">
+            <div style="max-width:600px; margin:60px auto; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:24px;">
+                <div id="modal-content"></div>
             </div>
         </div>
 
@@ -455,10 +493,130 @@ async function checkServices() {
     document.getElementById('svc-godot').className = 'service-dot ' + (svc.godot.available ? 'online' : 'offline');
 }
 
+// --- Asset Store ---
+let storePage = 0;
+
+async function searchStore(page) {
+    if (page !== undefined) storePage = page;
+    else storePage = 0;
+
+    const q = document.getElementById('store-search').value;
+    const cat = document.getElementById('store-category').value;
+    const type = document.getElementById('store-type').value;
+    const params = new URLSearchParams({q, category: cat, asset_type: type, page: storePage});
+
+    const res = await fetch('/api/asset-library/search?' + params);
+    const data = await res.json();
+    const results = data.result || [];
+    const total = data.total_items || 0;
+    const perPage = data.page_length || 40;
+
+    const grid = document.getElementById('store-results');
+    if (!results.length) {
+        grid.innerHTML = '<div style="color:var(--text-dim); padding:20px;">No results found.</div>';
+        return;
+    }
+
+    grid.innerHTML = results.map(a => `
+        <div class="template-card" onclick="openAssetDetail(${a.asset_id})">
+            ${a.icon_url ? `<img src="${a.icon_url}" style="width:100%; height:80px; object-fit:contain; border-radius:4px; margin-bottom:8px;">` : ''}
+            <div class="tname">${a.title}</div>
+            <div class="tdesc">by ${a.author} &middot; ${a.cost}</div>
+            <div class="engines"><span>Godot ${a.godot_version}</span><span>${a.category}</span></div>
+        </div>
+    `).join('');
+
+    // Pagination
+    const totalPages = Math.ceil(total / perPage);
+    let pag = '';
+    if (totalPages > 1) {
+        if (storePage > 0) pag += `<button class="btn btn-outline btn-sm" onclick="searchStore(${storePage-1})">&larr; Prev</button> `;
+        pag += `Page ${storePage+1} of ${totalPages}`;
+        if (storePage < totalPages - 1) pag += ` <button class="btn btn-outline btn-sm" onclick="searchStore(${storePage+1})">Next &rarr;</button>`;
+    }
+    document.getElementById('store-pagination').innerHTML = pag;
+}
+
+async function openAssetDetail(id) {
+    const res = await fetch('/api/asset-library/asset/' + id);
+    const asset = await res.json();
+
+    const projects = await (await fetch('/api/projects')).json();
+    const projectOptions = projects.map(p =>
+        `<option value="${p.path.replace(/\\/g, '\\\\')}">${p.name}</option>`
+    ).join('');
+
+    document.getElementById('modal-content').innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:start;">
+            <div>
+                <div style="font-size:20px; font-weight:600;">${asset.title}</div>
+                <div style="color:var(--text-dim); margin-top:4px;">by ${asset.author} &middot; ${asset.cost} &middot; Godot ${asset.godot_version}</div>
+            </div>
+            ${asset.icon_url ? `<img src="${asset.icon_url}" style="width:64px; height:64px; border-radius:8px;">` : ''}
+        </div>
+        <div style="margin:16px 0; color:var(--text-dim); font-size:13px; line-height:1.6; max-height:200px; overflow-y:auto;">
+            ${asset.description || 'No description.'}
+        </div>
+        ${asset.browse_url ? `<div style="margin-bottom:12px;"><a href="${asset.browse_url}" target="_blank" style="color:var(--blue);">View on GitHub &rarr;</a></div>` : ''}
+        ${asset.previews && asset.previews.length ? `
+            <div style="display:flex; gap:8px; overflow-x:auto; margin-bottom:16px;">
+                ${asset.previews.filter(p => p.type === 'image').map(p =>
+                    `<img src="${p.link}" style="height:120px; border-radius:4px;">`
+                ).join('')}
+            </div>
+        ` : ''}
+        <div style="border-top:1px solid var(--border); padding-top:16px;">
+            <label style="font-size:13px; color:var(--text-dim); display:block; margin-bottom:6px;">Install into project:</label>
+            <div style="display:flex; gap:8px;">
+                <select class="form-input" id="install-project" style="flex:1;">
+                    ${projectOptions || '<option value="">No projects</option>'}
+                </select>
+                <select class="form-input" id="install-type" style="width:120px;">
+                    <option value="addon">As Addon</option>
+                    <option value="template">As Template</option>
+                </select>
+                <button class="btn btn-accent" onclick="installAsset(${asset.asset_id})">Install</button>
+            </div>
+        </div>
+    `;
+    document.getElementById('asset-modal').style.display = 'block';
+}
+
+function closeAssetModal() {
+    document.getElementById('asset-modal').style.display = 'none';
+}
+
+async function installAsset(assetId) {
+    const projectPath = document.getElementById('install-project').value;
+    const installAs = document.getElementById('install-type').value;
+    if (!projectPath) { alert('Select a project first'); return; }
+
+    const btn = event.target;
+    btn.textContent = 'Installing...';
+    btn.disabled = true;
+
+    const res = await fetch('/api/asset-library/install', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({asset_id: assetId, project_path: projectPath, install_as: installAs})
+    });
+    const result = await res.json();
+    if (result.ok) {
+        btn.textContent = 'Installed!';
+        btn.style.background = 'var(--accent)';
+        alert(`Installed "${result.asset}" (${result.files} files) to ${result.installed_to}`);
+    } else {
+        btn.textContent = 'Failed';
+        btn.disabled = false;
+        alert(result.error || 'Install failed');
+    }
+}
+
 // --- Init ---
 loadProjects();
 checkServices();
 setInterval(checkServices, 15000);
+// Pre-load store
+searchStore(0);
 </script>
 </body>
 </html>

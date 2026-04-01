@@ -467,11 +467,139 @@ async def regenerate_asset(request: Request):
     return JSONResponse({"error": "Unknown type"}, status_code=400)
 
 
-# --- API: Templates ---
+# --- API: Templates (built-in) ---
 
 @app.get("/api/templates")
 async def get_templates():
     return GAME_TEMPLATES
+
+
+# --- API: Godot Asset Library Browser ---
+
+ASSET_LIB_API = "https://godotengine.org/asset-library/api"
+
+@app.get("/api/asset-library/search")
+async def search_asset_library(
+    q: str = "",
+    category: int = 0,
+    godot_version: str = "4.6",
+    sort: str = "updated",
+    page: int = 0,
+    asset_type: str = "any",
+):
+    """Search the official Godot Asset Library."""
+    params = {"sort": sort, "page": str(page)}
+    if q:
+        params["filter"] = q
+    if category > 0:
+        params["category"] = str(category)
+    if godot_version:
+        params["godot_version"] = godot_version
+    if asset_type and asset_type != "any":
+        params["type"] = asset_type
+    try:
+        r = requests.get(f"{ASSET_LIB_API}/asset", params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return data
+    except Exception as e:
+        return {"error": str(e), "result": []}
+
+
+@app.get("/api/asset-library/asset/{asset_id}")
+async def get_asset_detail(asset_id: int):
+    """Get full details of a single asset from the Godot Asset Library."""
+    try:
+        r = requests.get(f"{ASSET_LIB_API}/asset/{asset_id}", timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/asset-library/categories")
+async def get_asset_categories():
+    """Get available categories."""
+    try:
+        r = requests.get(f"{ASSET_LIB_API}/configure", timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/asset-library/install")
+async def install_asset(request: Request):
+    """Download and install an asset into a project."""
+    data = await request.json()
+    asset_id = data.get("asset_id")
+    project_path = data.get("project_path", "")
+    install_as = data.get("install_as", "addon")  # addon or template
+
+    if not asset_id or not project_path:
+        return JSONResponse({"error": "asset_id and project_path required"}, status_code=400)
+
+    # Get asset details
+    try:
+        r = requests.get(f"{ASSET_LIB_API}/asset/{asset_id}", timeout=10)
+        r.raise_for_status()
+        asset = r.json()
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to get asset: {e}"}, status_code=500)
+
+    download_url = asset.get("download_url", "")
+    if not download_url:
+        return JSONResponse({"error": "No download URL for this asset"}, status_code=400)
+
+    # Download the zip
+    import tempfile, zipfile
+    try:
+        r = requests.get(download_url, timeout=60, stream=True)
+        r.raise_for_status()
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            for chunk in r.iter_content(8192):
+                tmp.write(chunk)
+            tmp_path = tmp.name
+
+        # Extract to project
+        target = Path(project_path)
+        if install_as == "addon":
+            extract_to = target / "addons" / asset.get("title", "asset").lower().replace(" ", "_")
+        else:
+            extract_to = target
+
+        extract_to.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(tmp_path) as zf:
+            # GitHub zips have a root folder — strip it
+            names = zf.namelist()
+            prefix = ""
+            if names and "/" in names[0]:
+                prefix = names[0].split("/")[0] + "/"
+
+            for member in names:
+                if member.endswith("/"):
+                    continue
+                # Strip the GitHub root folder prefix
+                rel_path = member[len(prefix):] if member.startswith(prefix) else member
+                if not rel_path:
+                    continue
+                out_path = extract_to / rel_path
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(out_path, "wb") as dst:
+                    dst.write(src.read())
+
+        os.unlink(tmp_path)
+
+        return {
+            "ok": True,
+            "asset": asset.get("title", ""),
+            "installed_to": str(extract_to),
+            "files": len([n for n in names if not n.endswith("/")]),
+        }
+
+    except Exception as e:
+        return JSONResponse({"error": f"Install failed: {e}"}, status_code=500)
 
 
 # --- API: Settings ---
