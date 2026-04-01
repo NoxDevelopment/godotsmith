@@ -21,8 +21,11 @@
             <div class="nav-item" onclick="showPage('new-game')">
                 <span class="icon">&#10010;</span><span>New Game</span>
             </div>
+            <div class="nav-item" onclick="showPage('catalog')">
+                <span class="icon">&#127912;</span><span>Asset Catalog</span>
+            </div>
             <div class="nav-item" onclick="showPage('store')">
-                <span class="icon">&#128230;</span><span>Asset Store</span>
+                <span class="icon">&#128230;</span><span>Godot Library</span>
             </div>
             <div class="nav-item" onclick="showPage('console')">
                 <span class="icon">&#9000;</span><span>Console</span>
@@ -144,6 +147,23 @@
                     <button class="btn btn-outline" onclick="clearForm()">Clear</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Curated Asset Catalog -->
+        <div class="page" id="page-catalog">
+            <div class="page-header">Asset Catalog</div>
+            <div class="page-subheader">Curated free game assets from itch.io, Kenney, GitHub — verified quality, ready to install.</div>
+            <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;" id="catalog-filters">
+                <button class="btn btn-accent btn-sm catalog-cat" data-cat="" onclick="filterCatalog('')">All</button>
+            </div>
+            <input class="form-input" id="catalog-search" placeholder="Search assets..." style="max-width:300px; margin-bottom:16px;"
+                   oninput="filterCatalog(document.querySelector('.catalog-cat.active')?.dataset.cat || '')">
+            <div class="template-grid" id="catalog-grid"></div>
+        </div>
+
+        <!-- Catalog Install Modal -->
+        <div id="catalog-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:100; overflow-y:auto;" onclick="if(event.target===this)this.style.display='none'">
+            <div style="max-width:600px; margin:60px auto; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:24px;" id="catalog-modal-content"></div>
         </div>
 
         <!-- Asset Store Page -->
@@ -493,6 +513,109 @@ async function checkServices() {
     document.getElementById('svc-godot').className = 'service-dot ' + (svc.godot.available ? 'online' : 'offline');
 }
 
+// --- Curated Catalog ---
+let catalogData = null;
+
+async function loadCatalog() {
+    const res = await fetch('/api/catalog');
+    catalogData = await res.json();
+
+    // Build category filter buttons
+    const filters = document.getElementById('catalog-filters');
+    filters.innerHTML = `<button class="btn btn-accent btn-sm catalog-cat active" data-cat="" onclick="filterCatalog('')">All (${catalogData.assets.length})</button>`;
+    catalogData.categories.forEach(c => {
+        const count = catalogData.assets.filter(a => a.category === c.id).length;
+        filters.innerHTML += `<button class="btn btn-outline btn-sm catalog-cat" data-cat="${c.id}" onclick="filterCatalog('${c.id}')">${c.icon} ${c.name} (${count})</button>`;
+    });
+
+    filterCatalog('');
+}
+
+function filterCatalog(category) {
+    document.querySelectorAll('.catalog-cat').forEach(b => {
+        b.className = b.dataset.cat === category ? 'btn btn-accent btn-sm catalog-cat active' : 'btn btn-outline btn-sm catalog-cat';
+    });
+
+    const q = (document.getElementById('catalog-search')?.value || '').toLowerCase();
+    let assets = catalogData.assets;
+    if (category) assets = assets.filter(a => a.category === category);
+    if (q) assets = assets.filter(a => a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q) || a.tags.some(t => t.includes(q)));
+
+    const grid = document.getElementById('catalog-grid');
+    grid.innerHTML = assets.map(a => `
+        <div class="template-card" onclick="openCatalogAsset('${a.id}')">
+            ${a.preview ? `<img src="${a.preview}" style="width:100%; height:80px; object-fit:cover; border-radius:4px; margin-bottom:8px;" onerror="this.style.display='none'">` : ''}
+            <div class="tname">${a.name}</div>
+            <div class="tdesc">${a.description.substring(0, 80)}${a.description.length > 80 ? '...' : ''}</div>
+            <div class="engines" style="margin-top:6px;">
+                <span>${a.source}</span><span>${a.license}</span>
+                ${a.tags.slice(0, 3).map(t => `<span>${t}</span>`).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+async function openCatalogAsset(id) {
+    const asset = catalogData.assets.find(a => a.id === id);
+    if (!asset) return;
+
+    const projects = await (await fetch('/api/projects')).json();
+    const opts = projects.map(p => `<option value="${p.path.replace(/\\/g, '\\\\')}">${p.name}</option>`).join('');
+
+    document.getElementById('catalog-modal-content').innerHTML = `
+        <div style="display:flex; gap:16px; align-items:start;">
+            ${asset.preview ? `<img src="${asset.preview}" style="width:120px; height:120px; object-fit:cover; border-radius:8px; flex-shrink:0;" onerror="this.style.display='none'">` : ''}
+            <div>
+                <div style="font-size:20px; font-weight:600;">${asset.name}</div>
+                <div style="color:var(--text-dim); margin-top:4px;">by ${asset.author} &middot; ${asset.license} &middot; ${asset.source}</div>
+                <div style="margin-top:8px; display:flex; gap:4px; flex-wrap:wrap;">
+                    ${asset.tags.map(t => `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:var(--bg-input); color:var(--text-muted);">${t}</span>`).join('')}
+                </div>
+            </div>
+        </div>
+        <div style="margin:16px 0; color:var(--text-dim); font-size:13px; line-height:1.6;">${asset.description}</div>
+        <a href="${asset.url}" target="_blank" style="color:var(--blue);">View source &rarr;</a>
+        <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:16px;">
+            <label style="font-size:13px; color:var(--text-dim); margin-bottom:6px; display:block;">Install into project:</label>
+            <div style="display:flex; gap:8px;">
+                <select class="form-input" id="catalog-install-project" style="flex:1;">
+                    ${opts || '<option value="">No projects</option>'}
+                </select>
+                <button class="btn btn-accent" onclick="installCatalogAsset('${asset.id}')">Install</button>
+            </div>
+        </div>
+    `;
+    document.getElementById('catalog-modal').style.display = 'block';
+}
+
+async function installCatalogAsset(id) {
+    const project = document.getElementById('catalog-install-project').value;
+    if (!project) { alert('Select a project'); return; }
+
+    const btn = event.target;
+    btn.textContent = 'Installing...';
+    btn.disabled = true;
+
+    const res = await fetch('/api/catalog/install', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({asset_id: id, project_path: project})
+    });
+    const result = await res.json();
+    if (result.ok) {
+        btn.textContent = 'Installed!';
+        alert(`Installed "${result.asset}" (${result.files} files) to ${result.installed_to}`);
+    } else if (result.manual) {
+        btn.textContent = 'Open Browser';
+        btn.disabled = false;
+        btn.onclick = () => window.open(result.url, '_blank');
+        alert(result.message);
+    } else {
+        btn.textContent = 'Failed';
+        btn.disabled = false;
+        alert(result.error);
+    }
+}
+
 // --- Asset Store ---
 let storePage = 0;
 
@@ -613,10 +736,9 @@ async function installAsset(assetId) {
 
 // --- Init ---
 loadProjects();
+loadCatalog();
 checkServices();
 setInterval(checkServices, 15000);
-// Pre-load store
-searchStore(0);
 </script>
 </body>
 </html>

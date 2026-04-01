@@ -467,6 +467,101 @@ async def regenerate_asset(request: Request):
     return JSONResponse({"error": "Unknown type"}, status_code=400)
 
 
+from asset_catalog import get_catalog, search_catalog
+
+# --- API: Curated Asset Catalog ---
+
+@app.get("/api/catalog")
+async def catalog_all():
+    return get_catalog()
+
+@app.get("/api/catalog/search")
+async def catalog_search(q: str = "", category: str = ""):
+    return search_catalog(query=q, category=category)
+
+@app.post("/api/catalog/install")
+async def catalog_install(request: Request):
+    """Download and install a curated catalog asset into a project."""
+    data = await request.json()
+    asset_id = data.get("asset_id", "")
+    project_path = data.get("project_path", "")
+
+    catalog = get_catalog()
+    asset = None
+    for a in catalog["assets"]:
+        if a["id"] == asset_id:
+            asset = a
+            break
+    if not asset:
+        return JSONResponse({"error": "Asset not found"}, status_code=404)
+
+    download_url = asset.get("download_url", "")
+    if not download_url:
+        return JSONResponse({"error": "No download URL"}, status_code=400)
+
+    # For GitHub zips — download and extract
+    if "github.com" in download_url and download_url.endswith(".zip"):
+        import tempfile, zipfile
+        try:
+            r = requests.get(download_url, timeout=60, stream=True)
+            r.raise_for_status()
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                for chunk in r.iter_content(8192):
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+
+            target = Path(project_path) / "addons" / asset["id"].replace("-", "_")
+            target.mkdir(parents=True, exist_ok=True)
+
+            with zipfile.ZipFile(tmp_path) as zf:
+                names = zf.namelist()
+                prefix = names[0].split("/")[0] + "/" if names and "/" in names[0] else ""
+                count = 0
+                for member in names:
+                    if member.endswith("/"):
+                        continue
+                    rel = member[len(prefix):] if member.startswith(prefix) else member
+                    if not rel:
+                        continue
+                    out = target / rel
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(member) as src, open(out, "wb") as dst:
+                        dst.write(src.read())
+                    count += 1
+
+            os.unlink(tmp_path)
+            return {"ok": True, "asset": asset["name"], "installed_to": str(target), "files": count}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    # For Kenney zips — direct download
+    if "kenney.nl" in download_url and download_url.endswith(".zip"):
+        import tempfile, zipfile
+        try:
+            r = requests.get(download_url, timeout=60, stream=True)
+            r.raise_for_status()
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                for chunk in r.iter_content(8192):
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+
+            target = Path(project_path) / "assets" / "imported" / asset["id"].replace("-", "_")
+            target.mkdir(parents=True, exist_ok=True)
+
+            with zipfile.ZipFile(tmp_path) as zf:
+                zf.extractall(target)
+
+            os.unlink(tmp_path)
+            count = sum(1 for _ in target.rglob("*") if _.is_file())
+            return {"ok": True, "asset": asset["name"], "installed_to": str(target), "files": count}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    # For itch.io — can't auto-download, provide URL
+    return {"ok": False, "manual": True, "url": download_url,
+            "message": f"Open {download_url} in your browser to download (itch.io requires manual download)"}
+
+
 # --- API: Templates (built-in) ---
 
 @app.get("/api/templates")
