@@ -565,16 +565,7 @@ async def console_ws(websocket: WebSocket):
             pass
 
 
-# --- Run ---
-
-if __name__ == "__main__":
-    cfg = load_config()
-    save_config(cfg)  # Ensure config file exists
-    print(f"\n  Godotsmith IDE")
-    print(f"  http://localhost:{cfg['port']}")
-    print(f"  http://{_get_local_ip()}:{cfg['port']}  (LAN)\n")
-    uvicorn.run(app, host=cfg["host"], port=cfg["port"])
-
+# --- Helpers ---
 
 def _get_local_ip() -> str:
     import socket
@@ -586,3 +577,14 @@ def _get_local_ip() -> str:
         return ip
     except Exception:
         return "localhost"
+
+
+# --- Run ---
+
+if __name__ == "__main__":
+    cfg = load_config()
+    save_config(cfg)
+    print(f"\n  Godotsmith IDE")
+    print(f"  http://localhost:{cfg['port']}")
+    print(f"  http://{_get_local_ip()}:{cfg['port']}  (LAN)\n")
+    uvicorn.run(app, host=cfg["host"], port=cfg["port"])
