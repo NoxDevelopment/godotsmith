@@ -71,9 +71,18 @@ def load_projects() -> list[dict]:
 def save_projects(projects: list[dict]):
     PROJECTS_FILE.write_text(json.dumps(projects, indent=2))
 
-def scan_projects(root: str) -> list[dict]:
-    """Auto-discover game projects."""
+def scan_projects(root: str, force_rescan: bool = False) -> list[dict]:
+    """Auto-discover game projects. Filters to only show projects under root."""
     projects = load_projects()
+
+    # Filter out projects not under the current root
+    root_norm = str(Path(root).resolve()).replace("\\", "/").lower()
+    projects = [p for p in projects if p["path"].replace("\\", "/").lower().startswith(root_norm)]
+
+    if force_rescan:
+        # Clear and rebuild from disk
+        projects = []
+
     existing_paths = {p["path"] for p in projects}
     root_path = Path(root)
     if not root_path.exists():
@@ -475,8 +484,12 @@ async def get_settings():
 async def update_settings(request: Request):
     data = await request.json()
     cfg = load_config()
+    old_root = cfg.get("projects_root", "")
     cfg.update(data)
     save_config(cfg)
+    # If projects root changed, rescan
+    if cfg.get("projects_root", "") != old_root:
+        scan_projects(cfg["projects_root"], force_rescan=True)
     return {"ok": True}
 
 
