@@ -433,6 +433,127 @@ async def stop_service(name: str):
 
 # --- API: Asset Regeneration ---
 
+# --- API: Project Actions ---
+
+@app.post("/api/project/capture")
+async def capture_screenshot(request: Request):
+    """Capture a screenshot from the running Godot project."""
+    data = await request.json()
+    path = data.get("path", "")
+    cfg = load_config()
+    pf = Path(path) / "project.godot"
+    if not pf.exists():
+        return JSONResponse({"error": "No project.godot"}, status_code=400)
+
+    ss_dir = Path(path) / "screenshots" / "ide_capture"
+    ss_dir.mkdir(parents=True, exist_ok=True)
+    (Path(path) / "screenshots" / ".gdignore").touch()
+
+    result = subprocess.run(
+        [cfg["godot_exe"], "--rendering-method", "forward_plus",
+         "--write-movie", str(ss_dir / "frame.png"),
+         "--fixed-fps", "2", "--quit-after", "4", "--path", path],
+        capture_output=True, text=True, timeout=30,
+    )
+    # Find the latest frame
+    frames = sorted(ss_dir.glob("frame*.png"))
+    if frames:
+        return {"ok": True, "screenshot": str(frames[-1])}
+    return {"ok": False, "error": result.stderr[:500] if result.stderr else "No frames captured"}
+
+
+@app.get("/api/project/git-log/{path:path}")
+async def get_git_log(path: str):
+    """Get recent git history for a project."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--oneline", "--no-decorate", "-20"],
+            cwd=path, capture_output=True, text=True, timeout=10,
+        )
+        lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
+        commits = []
+        for line in lines:
+            parts = line.split(" ", 1)
+            commits.append({"hash": parts[0], "message": parts[1] if len(parts) > 1 else ""})
+        return {"commits": commits}
+    except Exception as e:
+        return {"commits": [], "error": str(e)}
+
+
+@app.get("/api/project/errors/{path:path}")
+async def check_project_errors(path: str):
+    """Run Godot headless to check for compile errors."""
+    cfg = load_config()
+    pf = Path(path) / "project.godot"
+    if not pf.exists():
+        return {"errors": [], "status": "no_project"}
+    try:
+        result = subprocess.run(
+            [cfg["godot_exe"], "--headless", "--quit", "--path", path],
+            capture_output=True, text=True, timeout=30,
+        )
+        output = result.stdout + result.stderr
+        errors = []
+        for line in output.splitlines():
+            line_lower = line.lower()
+            if "error" in line_lower and ("parse" in line_lower or "script" in line_lower or "compile" in line_lower):
+                if "rid" not in line_lower and "leaked" not in line_lower:
+                    errors.append(line.strip())
+        return {"errors": errors, "status": "clean" if not errors else "errors"}
+    except subprocess.TimeoutExpired:
+        return {"errors": ["Godot timed out"], "status": "timeout"}
+    except Exception as e:
+        return {"errors": [str(e)], "status": "error"}
+
+
+@app.post("/api/project/build-scenes")
+async def build_scenes(request: Request):
+    """Run scene builder scripts."""
+    data = await request.json()
+    path = data.get("path", "")
+    cfg = load_config()
+    builder = Path(path) / "scenes" / "build_all.gd"
+    if not builder.exists():
+        return {"ok": False, "error": "No scenes/build_all.gd found"}
+    try:
+        result = subprocess.run(
+            [cfg["godot_exe"], "--headless", "--script", str(builder), "--path", path],
+            capture_output=True, text=True, timeout=60,
+        )
+        return {"ok": True, "output": result.stdout, "errors": result.stderr}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/project/update-task")
+async def update_plan_task(request: Request):
+    """Update a task status in PLAN.md."""
+    data = await request.json()
+    path = data.get("path", "")
+    task_title = data.get("title", "")
+    new_status = data.get("status", "")
+    plan_path = Path(path) / "PLAN.md"
+    if not plan_path.exists():
+        return {"ok": False, "error": "No PLAN.md"}
+
+    content = plan_path.read_text()
+    # Find the task and update status
+    lines = content.splitlines()
+    updated = False
+    for i, line in enumerate(lines):
+        if task_title and task_title in line and line.startswith("## "):
+            # Find the status line after this
+            for j in range(i + 1, min(i + 10, len(lines))):
+                if "**Status:**" in lines[j]:
+                    lines[j] = f"- **Status:** {new_status}"
+                    updated = True
+                    break
+            break
+    if updated:
+        plan_path.write_text("\n".join(lines))
+    return {"ok": updated}
+
+
 @app.post("/api/regenerate-asset")
 async def regenerate_asset(request: Request):
     data = await request.json()

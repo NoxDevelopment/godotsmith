@@ -55,37 +55,107 @@
                 <div>
                     <span class="btn btn-outline btn-sm" onclick="showPage('projects')">&larr; Back</span>
                     <span id="detail-name" style="font-size:20px; font-weight:600; margin-left:12px;"></span>
+                    <span id="detail-engine-badge" class="engine-badge godot" style="margin-left:8px;"></span>
                 </div>
-                <div class="actions" id="detail-actions"></div>
+                <div style="display:flex; gap:8px;" id="detail-actions"></div>
             </div>
+
+            <!-- Quick Stats Bar -->
+            <div style="display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
+                <div style="background:var(--bg-card); padding:10px 16px; border-radius:var(--radius); border:1px solid var(--border);">
+                    <div style="font-size:11px; color:var(--text-muted);">Build Status</div>
+                    <div id="detail-build-status" style="font-size:14px; font-weight:600; color:var(--accent);">Checking...</div>
+                </div>
+                <div style="background:var(--bg-card); padding:10px 16px; border-radius:var(--radius); border:1px solid var(--border);">
+                    <div style="font-size:11px; color:var(--text-muted);">Images</div>
+                    <div id="detail-image-count" style="font-size:14px; font-weight:600;">0</div>
+                </div>
+                <div style="background:var(--bg-card); padding:10px 16px; border-radius:var(--radius); border:1px solid var(--border);">
+                    <div style="font-size:11px; color:var(--text-muted);">Audio</div>
+                    <div id="detail-audio-count" style="font-size:14px; font-weight:600;">0</div>
+                </div>
+                <div style="background:var(--bg-card); padding:10px 16px; border-radius:var(--radius); border:1px solid var(--border);">
+                    <div style="font-size:11px; color:var(--text-muted);">Tasks</div>
+                    <div id="detail-task-count" style="font-size:14px; font-weight:600;">0</div>
+                </div>
+                <div style="flex:1;"></div>
+                <button class="btn btn-blue btn-sm" onclick="capturePreview()">📸 Capture Preview</button>
+                <button class="btn btn-outline btn-sm" onclick="checkErrors()">🔍 Check Errors</button>
+                <button class="btn btn-outline btn-sm" onclick="buildScenes()">🔨 Rebuild Scenes</button>
+            </div>
+
+            <!-- Live Preview -->
+            <div id="detail-preview" style="display:none; margin-bottom:16px; text-align:center; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:12px;">
+                <img id="preview-img" style="max-width:100%; max-height:300px; border-radius:4px;">
+            </div>
+
+            <!-- Error Log -->
+            <div id="detail-errors" style="display:none; margin-bottom:16px; background:#2a1010; border:1px solid var(--red); border-radius:var(--radius); padding:12px;">
+                <div style="font-size:13px; font-weight:600; color:var(--red); margin-bottom:6px;">Compile Errors</div>
+                <div id="error-list" style="font-family:Consolas; font-size:12px; color:#ff8888;"></div>
+            </div>
+
             <div class="detail-tabs">
                 <div class="detail-tab active" onclick="showDetailTab('design')">Design Doc</div>
                 <div class="detail-tab" onclick="showDetailTab('plan')">Build Plan</div>
                 <div class="detail-tab" onclick="showDetailTab('assets')">Assets</div>
                 <div class="detail-tab" onclick="showDetailTab('audio')">Audio</div>
                 <div class="detail-tab" onclick="showDetailTab('screenshots')">Screenshots</div>
+                <div class="detail-tab" onclick="showDetailTab('git')">Git History</div>
             </div>
+
             <div class="detail-panel active" id="panel-design">
                 <div class="doc-view" id="design-doc"></div>
+                <div style="margin-top:12px;">
+                    <div style="font-size:14px; font-weight:600; margin-bottom:8px;">Architecture (STRUCTURE.md)</div>
+                    <div class="doc-view" id="structure-doc" style="max-height:300px;"></div>
+                </div>
             </div>
+
             <div class="detail-panel" id="panel-plan">
+                <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                    <span style="font-size:16px; font-weight:600;">Build Plan</span>
+                </div>
                 <div id="plan-tasks"></div>
             </div>
+
             <div class="detail-panel" id="panel-assets">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <span style="font-size:16px; font-weight:600;">Images</span>
-                    <button class="btn btn-accent btn-sm" onclick="showRegenModal()">+ Generate Asset</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-accent btn-sm" onclick="showGenModal('image')">+ Generate Image</button>
+                        <button class="btn btn-outline btn-sm" onclick="showGenModal('rembg')">Remove BG</button>
+                    </div>
                 </div>
                 <div class="asset-grid" id="asset-images"></div>
             </div>
+
             <div class="detail-panel" id="panel-audio">
-                <span style="font-size:16px; font-weight:600;">Audio Files</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <span style="font-size:16px; font-weight:600;">Audio Files</span>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-accent btn-sm" onclick="showGenModal('sfx')">+ Generate SFX</button>
+                        <button class="btn btn-outline btn-sm" onclick="showGenModal('tts')">+ Generate TTS</button>
+                        <button class="btn btn-outline btn-sm" onclick="showGenModal('music')">+ Generate Music</button>
+                    </div>
+                </div>
                 <div id="audio-list" style="margin-top:12px;"></div>
             </div>
+
             <div class="detail-panel" id="panel-screenshots">
                 <span style="font-size:16px; font-weight:600;">Screenshots</span>
                 <div class="asset-grid" id="screenshot-grid" style="margin-top:12px;"></div>
             </div>
+
+            <div class="detail-panel" id="panel-git">
+                <span style="font-size:16px; font-weight:600;">Recent Commits</span>
+                <div id="git-log" style="margin-top:12px;"></div>
+            </div>
+        </div>
+
+        <!-- Generation Modal -->
+        <div id="gen-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:100; overflow-y:auto;" onclick="if(event.target===this)this.style.display='none'">
+            <div style="max-width:550px; margin:60px auto; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:24px;" id="gen-modal-content"></div>
         </div>
 
         <!-- New Game Page -->
@@ -320,50 +390,73 @@ async function loadProjects() {
 
 async function openProject(path) {
     currentProject = path;
-    const res = await fetch('/api/project/' + encodeURIComponent(path));
+    const ep = encodeURIComponent(path);
+    const res = await fetch('/api/project/' + ep);
     const detail = await res.json();
+    const esc = path.replace(/\\/g, '\\\\');
 
     document.getElementById('detail-name').textContent = path.split(/[/\\]/).pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    document.getElementById('detail-engine-badge').textContent = (detail.engine || 'GODOT').toUpperCase();
     document.getElementById('detail-actions').innerHTML = `
-        <button class="btn btn-accent btn-sm" onclick="launch('claude', '${path.replace(/\\/g, '\\\\')}')">Claude Code</button>
-        <button class="btn btn-blue btn-sm" onclick="launch('godot-editor', '${path.replace(/\\/g, '\\\\')}')">Godot</button>
-        <button class="btn btn-blue btn-sm" onclick="launch('godot-run', '${path.replace(/\\/g, '\\\\')}')">Run</button>
+        <button class="btn btn-accent btn-sm" onclick="launch('claude', '${esc}')">Claude Code</button>
+        <button class="btn btn-blue btn-sm" onclick="launch('godot-editor', '${esc}')">Godot Editor</button>
+        <button class="btn btn-blue btn-sm" onclick="launch('godot-run', '${esc}')">▶ Run Game</button>
+        <button class="btn btn-outline btn-sm" onclick="launch('folder', '${esc}')">📁 Folder</button>
     `;
 
-    // Design doc
-    const doc = detail.game_prompt_md || detail.plan_md || 'No design document found.';
-    document.getElementById('design-doc').textContent = doc;
-
-    // Plan tasks
+    // Quick stats
+    const images = detail.assets?.images || [];
+    const audio = detail.assets?.audio || [];
     const tasks = detail.tasks || [];
-    document.getElementById('plan-tasks').innerHTML = tasks.length ? tasks.map(t => `
-        <div class="task-item">
-            <div class="task-status ${t.status.replace(/\s/g, '_')}"></div>
-            <div class="task-title">${t.title}</div>
-        </div>
-    `).join('') : '<div style="color:var(--text-dim); padding:20px;">No build plan yet. Run Claude Code to generate one.</div>';
+    const done = tasks.filter(t => t.status.includes('done')).length;
+    document.getElementById('detail-image-count').textContent = images.length;
+    document.getElementById('detail-audio-count').textContent = audio.length;
+    document.getElementById('detail-task-count').textContent = `${done}/${tasks.length}`;
+    document.getElementById('detail-build-status').textContent = 'Checking...';
+    document.getElementById('detail-errors').style.display = 'none';
+    document.getElementById('detail-preview').style.display = 'none';
 
-    // Assets
-    const images = (detail.assets?.images || []);
+    // Check build status async
+    checkErrors();
+
+    // Design doc
+    document.getElementById('design-doc').textContent = detail.game_prompt_md || detail.plan_md || 'No design document found.';
+    document.getElementById('structure-doc').textContent = detail.structure_md || 'No STRUCTURE.md yet.';
+
+    // Plan tasks with status controls
+    document.getElementById('plan-tasks').innerHTML = tasks.length ? tasks.map(t => {
+        const statusClass = t.status.includes('done') ? 'done' : t.status.includes('progress') ? 'in_progress' : 'pending';
+        return `<div class="task-item">
+            <div class="task-status ${statusClass}"></div>
+            <div class="task-title" style="flex:1;">${t.title}</div>
+            <select class="form-input" style="width:120px; padding:4px 8px; font-size:11px;" onchange="updateTaskStatus('${t.title.replace(/'/g,"\\'")}', this.value)">
+                <option ${t.status==='pending'?'selected':''}>pending</option>
+                <option ${t.status.includes('progress')?'selected':''}>in_progress</option>
+                <option ${t.status.includes('done')?'selected':''}>done</option>
+            </select>
+        </div>`;
+    }).join('') : '<div style="color:var(--text-dim); padding:20px;">No build plan yet.</div>';
+
+    // Asset images
     document.getElementById('asset-images').innerHTML = images.length ? images.map(a => `
-        <div class="asset-thumb" onclick="window.open('/api/asset/${encodeURIComponent(a.path)}')">
+        <div class="asset-thumb" onclick="openImageDetail('${encodeURIComponent(a.path)}', '${a.name}')">
             <img src="/api/asset/${encodeURIComponent(a.path)}" loading="lazy" alt="${a.name}">
             <div class="aname">${a.name}</div>
+            <div style="font-size:10px; color:var(--text-muted);">${(a.size/1024).toFixed(0)}KB</div>
         </div>
-    `).join('') : '<div style="color:var(--text-dim);">No images generated yet.</div>';
+    `).join('') : '<div style="color:var(--text-dim);">No images yet.</div>';
 
-    // Audio
-    const audio = (detail.assets?.audio || []);
+    // Audio with players
     document.getElementById('audio-list').innerHTML = audio.length ? audio.map(a => `
         <div class="audio-item">
             <div class="aname">${a.name}</div>
             <audio controls preload="none" src="/api/asset/${encodeURIComponent(a.path)}"></audio>
             <span style="font-size:11px; color:var(--text-muted);">${(a.size/1024).toFixed(0)}KB</span>
         </div>
-    `).join('') : '<div style="color:var(--text-dim);">No audio files yet.</div>';
+    `).join('') : '<div style="color:var(--text-dim);">No audio yet.</div>';
 
     // Screenshots
-    const screenshots = (detail.screenshots || []);
+    const screenshots = detail.screenshots || [];
     document.getElementById('screenshot-grid').innerHTML = screenshots.length ? screenshots.map(s => `
         <div class="asset-thumb">
             <img src="/api/asset/${encodeURIComponent(s.path)}" loading="lazy" alt="${s.name}">
@@ -371,8 +464,167 @@ async function openProject(path) {
         </div>
     `).join('') : '<div style="color:var(--text-dim);">No screenshots yet.</div>';
 
+    // Git log
+    loadGitLog(path);
+
     showPage('detail');
     showDetailTab('design');
+}
+
+async function loadGitLog(path) {
+    const res = await fetch('/api/project/git-log/' + encodeURIComponent(path));
+    const data = await res.json();
+    const log = document.getElementById('git-log');
+    log.innerHTML = (data.commits || []).map(c => `
+        <div style="display:flex; gap:10px; padding:6px 0; border-bottom:1px solid var(--border);">
+            <span style="font-family:Consolas; font-size:12px; color:var(--accent); min-width:70px;">${c.hash}</span>
+            <span style="font-size:13px;">${c.message}</span>
+        </div>
+    `).join('') || '<div style="color:var(--text-dim);">No commits yet.</div>';
+}
+
+async function capturePreview() {
+    if (!currentProject) return;
+    document.getElementById('detail-build-status').textContent = 'Capturing...';
+    const res = await fetch('/api/project/capture', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: currentProject})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        const img = document.getElementById('preview-img');
+        img.src = '/api/asset/' + encodeURIComponent(data.screenshot) + '?t=' + Date.now();
+        document.getElementById('detail-preview').style.display = 'block';
+        document.getElementById('detail-build-status').textContent = 'Captured';
+    } else {
+        document.getElementById('detail-build-status').textContent = 'Capture failed';
+    }
+}
+
+async function checkErrors() {
+    if (!currentProject) return;
+    const res = await fetch('/api/project/errors/' + encodeURIComponent(currentProject));
+    const data = await res.json();
+    if (data.status === 'clean') {
+        document.getElementById('detail-build-status').textContent = '✓ Clean';
+        document.getElementById('detail-build-status').style.color = 'var(--accent)';
+        document.getElementById('detail-errors').style.display = 'none';
+    } else if (data.errors?.length) {
+        document.getElementById('detail-build-status').textContent = `✗ ${data.errors.length} errors`;
+        document.getElementById('detail-build-status').style.color = 'var(--red)';
+        document.getElementById('error-list').innerHTML = data.errors.map(e => `<div>${e}</div>`).join('');
+        document.getElementById('detail-errors').style.display = 'block';
+    } else {
+        document.getElementById('detail-build-status').textContent = data.status || '?';
+    }
+}
+
+async function buildScenes() {
+    if (!currentProject) return;
+    document.getElementById('detail-build-status').textContent = 'Building...';
+    const res = await fetch('/api/project/build-scenes', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: currentProject})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        document.getElementById('detail-build-status').textContent = '✓ Built';
+        document.getElementById('detail-build-status').style.color = 'var(--accent)';
+        checkErrors();
+    } else {
+        document.getElementById('detail-build-status').textContent = 'Build failed';
+        document.getElementById('detail-build-status').style.color = 'var(--red)';
+    }
+}
+
+async function updateTaskStatus(title, status) {
+    if (!currentProject) return;
+    await fetch('/api/project/update-task', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: currentProject, title, status})
+    });
+}
+
+function openImageDetail(encodedPath, name) {
+    window.open('/api/asset/' + encodedPath, '_blank');
+}
+
+function showGenModal(type) {
+    const m = document.getElementById('gen-modal-content');
+    if (type === 'image') {
+        m.innerHTML = `
+            <div style="font-size:18px; font-weight:600; margin-bottom:16px;">Generate Image</div>
+            <div class="form-group"><label>Prompt</label><textarea class="form-input" id="gen-prompt" rows="3" placeholder="Describe the image..."></textarea></div>
+            <div class="form-group"><label>Filename</label><input class="form-input" id="gen-filename" placeholder="my_sprite.png"></div>
+            <div class="form-group"><label>Size</label><select class="form-input" id="gen-size"><option>512</option><option selected>1K</option><option>2K</option></select></div>
+            <button class="btn btn-accent" onclick="generateAsset('image')">Generate</button>
+            <div id="gen-result" style="margin-top:12px;"></div>
+        `;
+    } else if (type === 'sfx') {
+        m.innerHTML = `
+            <div style="font-size:18px; font-weight:600; margin-bottom:16px;">Generate Sound Effect</div>
+            <div class="form-group"><label>Type</label><select class="form-input" id="gen-sfx-type">
+                <option>explosion</option><option>laser</option><option>coin</option><option>jump</option><option>hit</option><option>powerup</option>
+            </select></div>
+            <div class="form-group"><label>Duration (seconds)</label><input class="form-input" id="gen-sfx-dur" type="number" value="0.5" step="0.1"></div>
+            <div class="form-group"><label>Filename</label><input class="form-input" id="gen-sfx-name" placeholder="my_sfx.wav"></div>
+            <button class="btn btn-accent" onclick="generateAsset('sfx')">Generate</button>
+            <div id="gen-result" style="margin-top:12px;"></div>
+        `;
+    } else if (type === 'tts') {
+        m.innerHTML = `
+            <div style="font-size:18px; font-weight:600; margin-bottom:16px;">Generate Speech (TTS)</div>
+            <div class="form-group"><label>Text</label><textarea class="form-input" id="gen-tts-text" rows="3" placeholder="Hello, adventurer!"></textarea></div>
+            <div class="form-group"><label>Voice</label><select class="form-input" id="gen-tts-voice">
+                <option value="female_us">Female US</option><option value="male_us">Male US</option>
+                <option value="female_uk">Female UK</option><option value="male_uk">Male UK</option>
+            </select></div>
+            <div class="form-group"><label>Filename</label><input class="form-input" id="gen-tts-name" placeholder="dialogue.mp3"></div>
+            <button class="btn btn-accent" onclick="generateAsset('tts')">Generate</button>
+            <div id="gen-result" style="margin-top:12px;"></div>
+        `;
+    } else if (type === 'music') {
+        m.innerHTML = `
+            <div style="font-size:18px; font-weight:600; margin-bottom:16px;">Generate Music</div>
+            <div class="form-group"><label>Mood</label><select class="form-input" id="gen-music-mood">
+                <option>neutral</option><option>happy</option><option>sad</option><option>tense</option><option>dark</option><option>epic</option>
+            </select></div>
+            <div class="form-group"><label>Tempo (BPM)</label><input class="form-input" id="gen-music-tempo" type="number" value="120"></div>
+            <div class="form-group"><label>Duration (seconds)</label><input class="form-input" id="gen-music-dur" type="number" value="30"></div>
+            <div class="form-group"><label>Filename</label><input class="form-input" id="gen-music-name" placeholder="bgm.wav"></div>
+            <button class="btn btn-accent" onclick="generateAsset('music')">Generate</button>
+            <div id="gen-result" style="margin-top:12px;"></div>
+        `;
+    }
+    document.getElementById('gen-modal').style.display = 'block';
+}
+
+async function generateAsset(type) {
+    if (!currentProject) return;
+    const resultDiv = document.getElementById('gen-result');
+    resultDiv.innerHTML = '<div style="color:var(--text-dim);">Generating...</div>';
+
+    let body = {project_path: currentProject, type};
+    if (type === 'image') {
+        body.prompt = document.getElementById('gen-prompt').value;
+        body.output_name = document.getElementById('gen-filename').value;
+    } else if (type === 'sfx') {
+        body.sfx_type = document.getElementById('gen-sfx-type').value;
+        body.output_name = document.getElementById('gen-sfx-name').value;
+    }
+
+    const res = await fetch('/api/regenerate-asset', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.ok) {
+        resultDiv.innerHTML = '<div style="color:var(--accent);">✓ Generated successfully!</div>';
+        // Refresh project
+        setTimeout(() => openProject(currentProject), 1000);
+    } else {
+        resultDiv.innerHTML = `<div style="color:var(--red);">Error: ${data.error || 'Failed'}</div>`;
+    }
 }
 
 // --- New Game ---
