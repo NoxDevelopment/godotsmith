@@ -554,6 +554,167 @@ async def update_plan_task(request: Request):
     return {"ok": updated}
 
 
+# --- API: Sprite Studio ---
+
+@app.post("/api/sprites/generate")
+async def generate_sprite(request: Request):
+    """Generate pixel art sprites via ComfyUI with 2D Pixel Toolkit LoRAs."""
+    data = await request.json()
+    project_path = data.get("project_path", "")
+    prompt = data.get("prompt", "")
+    sprite_type = data.get("sprite_type", "sprite_64")  # sprite_64, sprite_32, animal, weapon, etc.
+    columns = data.get("columns", 4)
+    rows = data.get("rows", 4)
+    bg_color = data.get("bg_color", "#00FF00")
+    filename = data.get("filename", "sprite_sheet.png")
+    remove_bg = data.get("remove_bg", True)
+
+    if not project_path or not prompt:
+        return JSONResponse({"error": "project_path and prompt required"}, status_code=400)
+
+    cfg = load_config()
+    if not check_service(cfg["comfyui_port"]):
+        return JSONResponse({"error": "ComfyUI not running"}, status_code=503)
+
+    # Build sprite generation workflow
+    # Prefix with pixel art trigger words based on type
+    trigger_words = {
+        "sprite_64": "sprites_64, pixel art sprite sheet,",
+        "sprite_32": "sprites_32, pixel art sprite sheet,",
+        "animal": "animal, pixel art sprite,",
+        "weapon": "cold_weapon, pixel art sprite,",
+        "item": "pixel art item sprite,",
+        "building": "isometric building, pixel art,",
+        "tileset": "pixel art tileset, seamless tile,",
+        "character": "pixel art character sprite sheet, multiple poses,",
+    }
+    full_prompt = f"{trigger_words.get(sprite_type, 'pixel art sprite,')} {prompt}"
+
+    # Use asset_gen with ComfyUI
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    output_path = Path(project_path) / "assets" / "img" / filename
+
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "asset_gen.py"), "image",
+         "--prompt", full_prompt, "--backend", "comfyui",
+         "--size", "1K", "-o", str(output_path)],
+        capture_output=True, text=True, cwd=project_path, timeout=120,
+    )
+
+    if result.returncode != 0:
+        return {"ok": False, "error": result.stderr[:500]}
+
+    # Optional background removal
+    if remove_bg and output_path.exists():
+        rembg_script = tools_dir / "rembg_matting.py"
+        if rembg_script.exists():
+            clean_path = output_path.with_stem(output_path.stem + "_clean")
+            bg_result = subprocess.run(
+                [sys.executable, str(rembg_script), str(output_path), "-o", str(clean_path)],
+                capture_output=True, text=True, timeout=120,
+            )
+            if bg_result.returncode == 0 and clean_path.exists():
+                clean_path.replace(output_path)
+
+    return {"ok": True, "path": str(output_path)}
+
+
+@app.post("/api/sprites/remove-bg")
+async def remove_sprite_bg(request: Request):
+    """Remove background from an existing sprite image."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    if not image_path or not Path(image_path).exists():
+        return JSONResponse({"error": "Image not found"}, status_code=404)
+
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    rembg_script = tools_dir / "rembg_matting.py"
+
+    output = Path(image_path).with_stem(Path(image_path).stem + "_nobg")
+    result = subprocess.run(
+        [sys.executable, str(rembg_script), image_path, "-o", str(output)],
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode == 0 and output.exists():
+        return {"ok": True, "path": str(output)}
+    return {"ok": False, "error": result.stderr[:500]}
+
+
+# --- API: Audio Studio ---
+
+@app.post("/api/audio/generate-sfx")
+async def generate_sfx(request: Request):
+    """Generate sound effects."""
+    data = await request.json()
+    project_path = data.get("project_path", "")
+    sfx_type = data.get("sfx_type", "hit")
+    duration = data.get("duration", 0.5)
+    filename = data.get("filename", "sfx.wav")
+
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    output = Path(project_path) / "assets" / "audio" / filename
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "audio_gen.py"), "sfx",
+         "--type", sfx_type, "--duration", str(duration), "-o", str(output)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode == 0:
+        return {"ok": True, "path": str(output)}
+    return {"ok": False, "error": result.stderr[:500]}
+
+
+@app.post("/api/audio/generate-tts")
+async def generate_tts(request: Request):
+    """Generate speech audio."""
+    data = await request.json()
+    project_path = data.get("project_path", "")
+    text = data.get("text", "")
+    voice = data.get("voice", "female_us")
+    speed = data.get("speed", 1.0)
+    filename = data.get("filename", "dialogue.mp3")
+
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    output = Path(project_path) / "assets" / "audio" / filename
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "audio_gen.py"), "tts",
+         "--text", text, "--voice", voice, "--speed", str(speed), "-o", str(output)],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode == 0:
+        return {"ok": True, "path": str(output)}
+    return {"ok": False, "error": result.stderr[:500]}
+
+
+@app.post("/api/audio/generate-music")
+async def generate_music(request: Request):
+    """Generate background music."""
+    data = await request.json()
+    project_path = data.get("project_path", "")
+    mood = data.get("mood", "neutral")
+    tempo = data.get("tempo", 120)
+    key = data.get("key", "C")
+    duration = data.get("duration", 30)
+    filename = data.get("filename", "bgm.wav")
+
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    output = Path(project_path) / "assets" / "audio" / filename
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "audio_gen.py"), "music",
+         "--mood", mood, "--tempo", str(tempo), "--key", key,
+         "--duration", str(duration), "-o", str(output)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode == 0:
+        return {"ok": True, "path": str(output)}
+    return {"ok": False, "error": result.stderr[:500]}
+
+
 @app.post("/api/regenerate-asset")
 async def regenerate_asset(request: Request):
     data = await request.json()

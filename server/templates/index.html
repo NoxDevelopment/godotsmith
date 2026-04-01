@@ -21,8 +21,14 @@
             <div class="nav-item" onclick="showPage('new-game')">
                 <span class="icon">&#10010;</span><span>New Game</span>
             </div>
+            <div class="nav-item" onclick="showPage('sprites')">
+                <span class="icon">&#127912;</span><span>Sprite Studio</span>
+            </div>
+            <div class="nav-item" onclick="showPage('audio-studio')">
+                <span class="icon">&#127925;</span><span>Audio Studio</span>
+            </div>
             <div class="nav-item" onclick="showPage('catalog')">
-                <span class="icon">&#127912;</span><span>Asset Catalog</span>
+                <span class="icon">&#128230;</span><span>Asset Catalog</span>
             </div>
             <div class="nav-item" onclick="showPage('store')">
                 <span class="icon">&#128230;</span><span>Godot Library</span>
@@ -216,6 +222,169 @@
                     <button class="btn btn-accent" onclick="createProject()" style="font-size:15px; padding:12px 24px;">Create & Launch</button>
                     <button class="btn btn-outline" onclick="clearForm()">Clear</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Sprite Studio Page -->
+        <div class="page" id="page-sprites">
+            <div class="page-header">Sprite Studio</div>
+            <div class="page-subheader">Generate pixel art sprites, character sheets, tilesets, and items via ComfyUI with pixel art LoRAs.</div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; max-width:1000px;">
+                <div>
+                    <div class="form-group">
+                        <label>Target Project</label>
+                        <select class="form-input" id="sprite-project" onchange="loadSpriteProject()"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Sprite Type</label>
+                        <select class="form-input" id="sprite-type">
+                            <option value="character">Character (multi-pose sheet)</option>
+                            <option value="sprite_64">Sprite 64px</option>
+                            <option value="sprite_32">Sprite 32px</option>
+                            <option value="animal">Animal</option>
+                            <option value="weapon">Weapon</option>
+                            <option value="item">Item / Pickup</option>
+                            <option value="tileset">Tileset Tile</option>
+                            <option value="building">Isometric Building</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea class="form-input" id="sprite-prompt" rows="3" placeholder="A medieval knight with sword and shield, silver armor"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Filename</label>
+                        <input class="form-input" id="sprite-filename" placeholder="knight_sprite.png">
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <div class="form-group" style="flex:1;">
+                            <label>BG Color</label>
+                            <input class="form-input" id="sprite-bg" value="#00FF00" type="color">
+                        </div>
+                        <div class="form-group">
+                            <label>&nbsp;</label>
+                            <label style="display:flex; align-items:center; gap:6px; padding:8px 0;">
+                                <input type="checkbox" id="sprite-rembg" checked> Remove Background
+                            </label>
+                        </div>
+                    </div>
+                    <button class="btn btn-accent" onclick="generateSprite()" style="width:100%; padding:12px;">Generate Sprite</button>
+                    <div id="sprite-result" style="margin-top:12px;"></div>
+                </div>
+                <div>
+                    <div style="font-size:14px; font-weight:600; margin-bottom:8px;">Preview</div>
+                    <div id="sprite-preview" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); min-height:300px; display:flex; align-items:center; justify-content:center; padding:12px;">
+                        <div style="color:var(--text-muted);">Generate a sprite to preview</div>
+                    </div>
+                    <div style="font-size:14px; font-weight:600; margin:16px 0 8px;">Project Sprites</div>
+                    <div class="asset-grid" id="sprite-gallery" style="max-height:300px; overflow-y:auto;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Studio Page -->
+        <div class="page" id="page-audio-studio">
+            <div class="page-header">Audio Studio</div>
+            <div class="page-subheader">Generate sound effects, music, dialogue, and voiceovers for your games.</div>
+
+            <div class="form-group" style="max-width:400px;">
+                <label>Target Project</label>
+                <select class="form-input" id="audio-project" onchange="loadAudioProject()"></select>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; max-width:1000px; margin-top:16px;">
+                <!-- SFX Panel -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🔊 Sound Effects</div>
+                    <div class="form-group">
+                        <label>Type</label>
+                        <select class="form-input" id="sfx-type">
+                            <option value="explosion">Explosion</option>
+                            <option value="laser">Laser / Zap</option>
+                            <option value="coin">Coin / Pickup</option>
+                            <option value="jump">Jump</option>
+                            <option value="hit">Hit / Impact</option>
+                            <option value="powerup">Power-Up</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Duration (sec)</label>
+                        <input class="form-input" id="sfx-duration" type="number" value="0.5" step="0.1" min="0.1" max="5">
+                    </div>
+                    <div class="form-group">
+                        <label>Filename</label>
+                        <input class="form-input" id="sfx-filename" placeholder="explosion.wav">
+                    </div>
+                    <button class="btn btn-accent btn-sm" onclick="studioGenerateSFX()" style="width:100%;">Generate SFX</button>
+                    <div id="sfx-result" style="margin-top:8px; font-size:12px;"></div>
+                </div>
+
+                <!-- Music Panel -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🎵 Music</div>
+                    <div class="form-group">
+                        <label>Mood</label>
+                        <select class="form-input" id="music-mood">
+                            <option value="neutral">Neutral</option>
+                            <option value="happy">Happy / Upbeat</option>
+                            <option value="sad">Sad / Melancholy</option>
+                            <option value="tense">Tense / Suspense</option>
+                            <option value="dark">Dark / Ominous</option>
+                            <option value="epic">Epic / Battle</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <div class="form-group" style="flex:1;"><label>Tempo</label><input class="form-input" id="music-tempo" type="number" value="120" min="40" max="200"></div>
+                        <div class="form-group" style="flex:1;"><label>Key</label><select class="form-input" id="music-key"><option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option></select></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Duration (sec)</label>
+                        <input class="form-input" id="music-duration" type="number" value="30" min="5" max="120">
+                    </div>
+                    <div class="form-group">
+                        <label>Filename</label>
+                        <input class="form-input" id="music-filename" placeholder="battle_bgm.wav">
+                    </div>
+                    <button class="btn btn-accent btn-sm" onclick="studioGenerateMusic()" style="width:100%;">Generate Music</button>
+                    <div id="music-result" style="margin-top:8px; font-size:12px;"></div>
+                </div>
+
+                <!-- TTS Panel -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🗣️ Dialogue (TTS)</div>
+                    <div class="form-group">
+                        <label>Text</label>
+                        <textarea class="form-input" id="tts-text" rows="3" placeholder="Welcome, brave adventurer..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Voice</label>
+                        <select class="form-input" id="tts-voice">
+                            <option value="female_us">Female (US)</option>
+                            <option value="female_uk">Female (UK)</option>
+                            <option value="male_us">Male (US)</option>
+                            <option value="male_uk">Male (UK)</option>
+                            <option value="female_jp">Female (Japanese)</option>
+                            <option value="male_jp">Male (Japanese)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Speed</label>
+                        <input class="form-input" id="tts-speed" type="range" min="0.5" max="2" step="0.1" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Filename</label>
+                        <input class="form-input" id="tts-filename" placeholder="npc_greeting.mp3">
+                    </div>
+                    <button class="btn btn-accent btn-sm" onclick="studioGenerateTTS()" style="width:100%;">Generate Speech</button>
+                    <div id="tts-result" style="margin-top:8px; font-size:12px;"></div>
+                </div>
+            </div>
+
+            <!-- Project Audio Files -->
+            <div style="margin-top:24px;">
+                <div style="font-size:16px; font-weight:600; margin-bottom:8px;">Project Audio Files</div>
+                <div id="studio-audio-list"></div>
             </div>
         </div>
 
@@ -765,6 +934,136 @@ async function checkServices() {
     document.getElementById('svc-godot').className = 'service-dot ' + (svc.godot.available ? 'online' : 'offline');
 }
 
+// --- Sprite Studio ---
+async function loadSpriteProjects() {
+    const projects = await (await fetch('/api/projects')).json();
+    const sel = document.getElementById('sprite-project');
+    sel.innerHTML = projects.map(p => `<option value="${p.path.replace(/\\/g, '\\\\')}">${p.name}</option>`).join('');
+    if (projects.length) loadSpriteProject();
+}
+
+async function loadSpriteProject() {
+    const path = document.getElementById('sprite-project').value;
+    if (!path) return;
+    const res = await fetch('/api/project/' + encodeURIComponent(path));
+    const detail = await res.json();
+    const images = detail.assets?.images || [];
+    const sprites = images.filter(a => a.name.includes('sprite'));
+    document.getElementById('sprite-gallery').innerHTML = sprites.length ? sprites.map(a => `
+        <div class="asset-thumb">
+            <img src="/api/asset/${encodeURIComponent(a.path)}" loading="lazy">
+            <div class="aname">${a.name}</div>
+        </div>
+    `).join('') : '<div style="color:var(--text-muted); padding:8px;">No sprites yet</div>';
+}
+
+async function generateSprite() {
+    const project = document.getElementById('sprite-project').value;
+    const prompt = document.getElementById('sprite-prompt').value;
+    const filename = document.getElementById('sprite-filename').value || 'sprite.png';
+    const spriteType = document.getElementById('sprite-type').value;
+    const removeBg = document.getElementById('sprite-rembg').checked;
+
+    if (!prompt) { alert('Enter a description'); return; }
+
+    const resultDiv = document.getElementById('sprite-result');
+    resultDiv.innerHTML = '<div style="color:var(--accent);">Generating... (this may take 15-30 seconds)</div>';
+
+    const res = await fetch('/api/sprites/generate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_path: project, prompt, sprite_type: spriteType, filename, remove_bg: removeBg})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        resultDiv.innerHTML = '<div style="color:var(--accent);">✓ Generated!</div>';
+        document.getElementById('sprite-preview').innerHTML = `<img src="/api/asset/${encodeURIComponent(data.path)}?t=${Date.now()}" style="max-width:100%; image-rendering:pixelated;">`;
+        loadSpriteProject();
+    } else {
+        resultDiv.innerHTML = `<div style="color:var(--red);">${data.error || 'Failed'}</div>`;
+    }
+}
+
+// --- Audio Studio ---
+async function loadAudioProjects() {
+    const projects = await (await fetch('/api/projects')).json();
+    const sel = document.getElementById('audio-project');
+    sel.innerHTML = projects.map(p => `<option value="${p.path.replace(/\\/g, '\\\\')}">${p.name}</option>`).join('');
+    if (projects.length) loadAudioProject();
+}
+
+async function loadAudioProject() {
+    const path = document.getElementById('audio-project').value;
+    if (!path) return;
+    const res = await fetch('/api/project/' + encodeURIComponent(path));
+    const detail = await res.json();
+    const audio = detail.assets?.audio || [];
+    document.getElementById('studio-audio-list').innerHTML = audio.length ? audio.map(a => `
+        <div class="audio-item">
+            <div class="aname">${a.name}</div>
+            <audio controls preload="none" src="/api/asset/${encodeURIComponent(a.path)}"></audio>
+            <span style="font-size:11px; color:var(--text-muted);">${(a.size/1024).toFixed(0)}KB</span>
+        </div>
+    `).join('') : '<div style="color:var(--text-dim);">No audio files yet.</div>';
+}
+
+async function studioGenerateSFX() {
+    const project = document.getElementById('audio-project').value;
+    const sfxType = document.getElementById('sfx-type').value;
+    const duration = document.getElementById('sfx-duration').value;
+    const filename = document.getElementById('sfx-filename').value || `${sfxType}.wav`;
+    document.getElementById('sfx-result').innerHTML = 'Generating...';
+
+    const res = await fetch('/api/audio/generate-sfx', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_path: project, sfx_type: sfxType, duration: parseFloat(duration), filename})
+    });
+    const data = await res.json();
+    document.getElementById('sfx-result').innerHTML = data.ok
+        ? `<span style="color:var(--accent);">✓ ${filename}</span>`
+        : `<span style="color:var(--red);">${data.error}</span>`;
+    if (data.ok) loadAudioProject();
+}
+
+async function studioGenerateMusic() {
+    const project = document.getElementById('audio-project').value;
+    const mood = document.getElementById('music-mood').value;
+    const tempo = document.getElementById('music-tempo').value;
+    const key = document.getElementById('music-key').value;
+    const duration = document.getElementById('music-duration').value;
+    const filename = document.getElementById('music-filename').value || 'bgm.wav';
+    document.getElementById('music-result').innerHTML = 'Generating...';
+
+    const res = await fetch('/api/audio/generate-music', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_path: project, mood, tempo: parseInt(tempo), key, duration: parseInt(duration), filename})
+    });
+    const data = await res.json();
+    document.getElementById('music-result').innerHTML = data.ok
+        ? `<span style="color:var(--accent);">✓ ${filename}</span>`
+        : `<span style="color:var(--red);">${data.error}</span>`;
+    if (data.ok) loadAudioProject();
+}
+
+async function studioGenerateTTS() {
+    const project = document.getElementById('audio-project').value;
+    const text = document.getElementById('tts-text').value;
+    const voice = document.getElementById('tts-voice').value;
+    const speed = document.getElementById('tts-speed').value;
+    const filename = document.getElementById('tts-filename').value || 'dialogue.mp3';
+    if (!text) { alert('Enter text'); return; }
+    document.getElementById('tts-result').innerHTML = 'Generating...';
+
+    const res = await fetch('/api/audio/generate-tts', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_path: project, text, voice, speed: parseFloat(speed), filename})
+    });
+    const data = await res.json();
+    document.getElementById('tts-result').innerHTML = data.ok
+        ? `<span style="color:var(--accent);">✓ ${filename}</span>`
+        : `<span style="color:var(--red);">${data.error}</span>`;
+    if (data.ok) loadAudioProject();
+}
+
 // --- Curated Catalog ---
 let catalogData = null;
 
@@ -989,6 +1288,8 @@ async function installAsset(assetId) {
 // --- Init ---
 loadProjects();
 loadCatalog();
+loadSpriteProjects();
+loadAudioProjects();
 checkServices();
 setInterval(checkServices, 15000);
 </script>
