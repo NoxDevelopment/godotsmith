@@ -350,60 +350,87 @@
             <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; max-width:1000px; margin-top:16px;">
                 <!-- SFX Panel -->
                 <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
-                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🔊 Sound Effects</div>
+                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🔊 Sound Effects (20 types)</div>
                     <div class="form-group">
                         <label>Type</label>
                         <select class="form-input" id="sfx-type">
-                            <option value="explosion">Explosion</option>
-                            <option value="laser">Laser / Zap</option>
-                            <option value="coin">Coin / Pickup</option>
-                            <option value="jump">Jump</option>
-                            <option value="hit">Hit / Impact</option>
-                            <option value="powerup">Power-Up</option>
+                            <optgroup label="Combat">
+                                <option value="hit">Hit / Impact</option><option value="sword">Sword Slash</option>
+                                <option value="explosion">Explosion</option><option value="laser">Laser / Zap</option>
+                                <option value="magic">Magic Spell</option><option value="heal">Heal / Restore</option>
+                            </optgroup>
+                            <optgroup label="Player">
+                                <option value="jump">Jump</option><option value="footstep">Footstep</option>
+                                <option value="coin">Coin / Pickup</option><option value="powerup">Power-Up</option>
+                                <option value="whoosh">Whoosh / Dash</option>
+                            </optgroup>
+                            <optgroup label="Environment">
+                                <option value="door">Door</option><option value="splash">Water Splash</option>
+                                <option value="fire">Fire Crackling</option><option value="wind">Wind</option>
+                                <option value="thunder">Thunder</option><option value="glass_break">Glass Break</option>
+                            </optgroup>
+                            <optgroup label="UI">
+                                <option value="click">Click</option><option value="confirm">Confirm</option>
+                                <option value="error_buzz">Error Buzz</option>
+                            </optgroup>
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label>Duration (sec)</label>
-                        <input class="form-input" id="sfx-duration" type="number" value="0.5" step="0.1" min="0.1" max="5">
+                    <div style="display:flex; gap:6px;">
+                        <div class="form-group" style="flex:1;"><label>Duration</label><input class="form-input" id="sfx-duration" type="number" value="0.5" step="0.1" min="0.05" max="5"></div>
+                        <div class="form-group" style="flex:1;"><label>Pitch</label><input class="form-input" id="sfx-pitch" type="number" value="1.0" step="0.1" min="0.3" max="3.0"></div>
                     </div>
-                    <div class="form-group">
-                        <label>Filename</label>
-                        <input class="form-input" id="sfx-filename" placeholder="explosion.wav">
-                    </div>
+                    <div class="form-group"><label>Reverb <span id="sfx-reverb-val">0.0</span></label><input class="form-input" id="sfx-reverb" type="range" min="0" max="1" step="0.1" value="0" oninput="document.getElementById('sfx-reverb-val').textContent=this.value"></div>
+                    <div class="form-group"><label>Filename</label><input class="form-input" id="sfx-filename" placeholder="explosion.wav"></div>
                     <button class="btn btn-accent btn-sm" onclick="studioGenerateSFX()" style="width:100%;">Generate SFX</button>
                     <div id="sfx-result" style="margin-top:8px; font-size:12px;"></div>
                 </div>
 
                 <!-- Music Panel -->
                 <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
-                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🎵 Music</div>
-                    <div class="form-group">
-                        <label>Mood</label>
-                        <select class="form-input" id="music-mood">
-                            <option value="neutral">Neutral</option>
-                            <option value="happy">Happy / Upbeat</option>
-                            <option value="sad">Sad / Melancholy</option>
-                            <option value="tense">Tense / Suspense</option>
-                            <option value="dark">Dark / Ominous</option>
-                            <option value="epic">Epic / Battle</option>
+                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🎵 Music Composer</div>
+                    <div style="display:flex; gap:6px;">
+                        <div class="form-group" style="flex:1;"><label>Mood</label>
+                            <select class="form-input" id="music-mood">
+                                <option value="neutral">Neutral</option><option value="happy">Happy</option><option value="sad">Sad</option>
+                                <option value="tense">Tense</option><option value="dark">Dark</option><option value="epic">Epic</option>
+                                <option value="blues">Blues</option><option value="pop">Pop</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:1;"><label>Scale</label>
+                            <select class="form-input" id="music-scale">
+                                <option value="major">Major</option><option value="minor">Minor</option><option value="pentatonic">Pentatonic</option>
+                                <option value="blues">Blues</option><option value="dorian">Dorian</option><option value="mixolydian">Mixolydian</option>
+                                <option value="harmonic_minor">Harmonic Minor</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <div class="form-group" style="flex:1;"><label>Key</label>
+                            <select class="form-input" id="music-key"><option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option><option>C#</option><option>D#</option><option>F#</option><option>G#</option><option>A#</option></select>
+                        </div>
+                        <div class="form-group" style="flex:1;"><label>Instrument</label>
+                            <select class="form-input" id="music-instrument">
+                                <option value="sine">Sine (Soft)</option><option value="triangle">Triangle (Warm)</option>
+                                <option value="square">Square (Retro)</option><option value="saw">Saw (Bright)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <div class="form-group" style="flex:1;"><label>Tempo</label><input class="form-input" id="music-tempo" type="number" value="120" min="40" max="220"></div>
+                        <div class="form-group" style="flex:1;"><label>Duration</label><input class="form-input" id="music-duration" type="number" value="30" min="5" max="120"></div>
+                    </div>
+                    <div class="form-group"><label>Layers</label>
+                        <select class="form-input" id="music-layers">
+                            <option value="1">1 — Pad Only</option><option value="2">2 — Pad + Melody</option>
+                            <option value="3" selected>3 — Pad + Melody + Bass</option><option value="4">4 — Full (+ Drums)</option>
                         </select>
                     </div>
-                    <div style="display:flex; gap:8px;">
-                        <div class="form-group" style="flex:1;"><label>Tempo</label><input class="form-input" id="music-tempo" type="number" value="120" min="40" max="200"></div>
-                        <div class="form-group" style="flex:1;"><label>Key</label><select class="form-input" id="music-key"><option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option></select></div>
-                    </div>
-                    <div class="form-group">
-                        <label>Duration (sec)</label>
-                        <input class="form-input" id="music-duration" type="number" value="30" min="5" max="120">
-                    </div>
-                    <div class="form-group">
-                        <label>Filename</label>
-                        <input class="form-input" id="music-filename" placeholder="battle_bgm.wav">
-                    </div>
-                    <button class="btn btn-accent btn-sm" onclick="studioGenerateMusic()" style="width:100%;">Generate Procedural</button>
+                    <div class="form-group"><label>Reverb <span id="music-reverb-val">0.2</span></label><input class="form-input" id="music-reverb" type="range" min="0" max="0.8" step="0.1" value="0.2" oninput="document.getElementById('music-reverb-val').textContent=this.value"></div>
+                    <div class="form-group"><label>Filename</label><input class="form-input" id="music-filename" placeholder="battle_bgm.wav"></div>
+                    <button class="btn btn-accent btn-sm" onclick="studioGenerateMusic()" style="width:100%;">Generate Music</button>
                     <div style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
                         <div style="font-size:12px; font-weight:600; margin-bottom:4px;">AI Music (Prompt-Based)</div>
-                        <div class="form-group"><textarea class="form-input" id="ai-music-prompt" rows="2" placeholder="epic orchestral battle theme, fast tempo, brass and strings" style="font-size:11px;"></textarea></div>
+                        <div class="form-group"><textarea class="form-input" id="ai-music-prompt" rows="2" placeholder="epic orchestral battle theme, brass and strings, fast tempo" style="font-size:11px;"></textarea></div>
                         <button class="btn btn-blue btn-sm" onclick="studioGenerateAIMusic()" style="width:100%;">Generate AI Music</button>
                     </div>
                     <div id="music-result" style="margin-top:8px; font-size:12px;"></div>
@@ -412,29 +439,42 @@
                 <!-- TTS Panel -->
                 <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
                     <div style="font-size:16px; font-weight:600; margin-bottom:12px;">🗣️ Dialogue (TTS)</div>
-                    <div class="form-group">
-                        <label>Text</label>
-                        <textarea class="form-input" id="tts-text" rows="3" placeholder="Welcome, brave adventurer..."></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>Voice</label>
+                    <div class="form-group"><label>Text</label><textarea class="form-input" id="tts-text" rows="3" placeholder="Welcome, brave adventurer..."></textarea></div>
+                    <div class="form-group"><label>Voice</label>
                         <select class="form-input" id="tts-voice">
-                            <option value="female_us">Female (US)</option>
-                            <option value="female_uk">Female (UK)</option>
-                            <option value="male_us">Male (US)</option>
-                            <option value="male_uk">Male (UK)</option>
-                            <option value="female_jp">Female (Japanese)</option>
-                            <option value="male_jp">Male (Japanese)</option>
+                            <optgroup label="English (US)">
+                                <option value="female_us">Aria (Female US)</option><option value="female_us_2">Jenny (Female US)</option>
+                                <option value="male_us">Guy (Male US)</option><option value="male_us_2">Christopher (Male US)</option>
+                            </optgroup>
+                            <optgroup label="English (UK)">
+                                <option value="female_uk">Sonia (Female UK)</option><option value="male_uk">Ryan (Male UK)</option>
+                            </optgroup>
+                            <optgroup label="Other Languages">
+                                <option value="female_jp">Nanami (Japanese)</option><option value="male_jp">Keita (Japanese)</option>
+                                <option value="female_de">Katja (German)</option><option value="male_de">Conrad (German)</option>
+                                <option value="female_fr">Denise (French)</option><option value="male_fr">Henri (French)</option>
+                                <option value="female_es">Elvira (Spanish)</option><option value="female_kr">SunHi (Korean)</option>
+                                <option value="female_cn">Xiaoxiao (Chinese)</option>
+                            </optgroup>
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label>Speed</label>
-                        <input class="form-input" id="tts-speed" type="range" min="0.5" max="2" step="0.1" value="1">
+                    <div class="form-group"><label>Emotion</label>
+                        <select class="form-input" id="tts-emotion">
+                            <option value="">None (Default)</option>
+                            <option value="cheerful">Cheerful</option><option value="sad">Sad</option>
+                            <option value="angry">Angry</option><option value="excited">Excited</option>
+                            <option value="friendly">Friendly</option><option value="terrified">Terrified</option>
+                            <option value="shouting">Shouting</option><option value="whispering">Whispering</option>
+                            <option value="hopeful">Hopeful</option>
+                            <option value="narrator">Narrator (Professional)</option><option value="newscast">Newscast</option>
+                        </select>
                     </div>
-                    <div class="form-group">
-                        <label>Filename</label>
-                        <input class="form-input" id="tts-filename" placeholder="npc_greeting.mp3">
+                    <div style="display:flex; gap:6px;">
+                        <div class="form-group" style="flex:1;"><label>Speed <span id="tts-speed-val">1.0x</span></label><input class="form-input" id="tts-speed" type="range" min="0.5" max="2" step="0.1" value="1" oninput="document.getElementById('tts-speed-val').textContent=this.value+'x'"></div>
+                        <div class="form-group" style="flex:1;"><label>Pitch <span id="tts-pitch-val">0Hz</span></label><input class="form-input" id="tts-pitch" type="range" min="-50" max="50" step="5" value="0" oninput="document.getElementById('tts-pitch-val').textContent=this.value+'Hz'"></div>
                     </div>
+                    <div class="form-group"><label>Volume <span id="tts-vol-val">1.0x</span></label><input class="form-input" id="tts-volume" type="range" min="0.5" max="1.5" step="0.1" value="1" oninput="document.getElementById('tts-vol-val').textContent=this.value+'x'"></div>
+                    <div class="form-group"><label>Filename</label><input class="form-input" id="tts-filename" placeholder="npc_greeting.mp3"></div>
                     <button class="btn btn-accent btn-sm" onclick="studioGenerateTTS()" style="width:100%;">Generate Speech</button>
                     <div id="tts-result" style="margin-top:8px; font-size:12px;"></div>
                 </div>
