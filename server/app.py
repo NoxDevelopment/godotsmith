@@ -1754,20 +1754,25 @@ async def launch_action(action: str, request: Request):
                 prompt_text = ""
 
             if prompt_text:
-                # Write a short continuation hint into CLAUDE.md appendix
-                # so Claude sees it immediately on startup
                 cont_file = Path(path) / "CONTINUE_PROMPT.md"
                 cont_file.write_text(prompt_text)
 
-                # Build a short safe prompt for the command line
-                # Keep it under 200 chars to avoid cmd escaping issues
-                short = "Read CONTINUE_PROMPT.md and proceed with the tasks listed there."
-                cmd = ["cmd", "/c", "start", "cmd", "/k",
-                       f'cd /d {path} && {claude_args} "{short}"']
+            # Write a batch file to avoid all cmd escaping issues
+            bat_file = Path(path) / ".godotsmith_launch.bat"
+            bat_lines = [
+                "@echo off",
+                f'cd /d "{path}"',
+            ]
+            if prompt_text:
+                bat_lines.append(f'{claude_args} "Read CONTINUE_PROMPT.md and proceed with the tasks listed there."')
             else:
-                cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && {claude_args}"]
+                bat_lines.append(claude_args)
+            bat_file.write_text("\r\n".join(bat_lines))
+            cmd = ["cmd", "/c", "start", "", "cmd", "/k", str(bat_file)]
         else:
-            cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && {claude_args}"]
+            bat_file = Path(path) / ".godotsmith_launch.bat"
+            bat_file.write_text(f"@echo off\r\ncd /d \"{path}\"\r\n{claude_args}\r\n")
+            cmd = ["cmd", "/c", "start", "", "cmd", "/k", str(bat_file)]
         subprocess.Popen(cmd, shell=False)
         return {"ok": True}
 
