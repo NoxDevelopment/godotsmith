@@ -740,6 +740,8 @@ async function loadProjects() {
                 <button class="btn btn-blue btn-sm" onclick="event.stopPropagation(); launch('godot-editor', '${p.path.replace(/\\/g, '\\\\')}')">Godot Editor</button>
                 <button class="btn btn-blue btn-sm" onclick="event.stopPropagation(); launch('godot-run', '${p.path.replace(/\\/g, '\\\\')}')">Run Game</button>
                 <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); launch('folder', '${p.path.replace(/\\/g, '\\\\')}')">Folder</button>
+                <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); duplicateProject('${p.path.replace(/\\/g, '\\\\')}', '${p.name}')">Duplicate</button>
+                <button class="btn btn-outline btn-sm" style="color:var(--red); border-color:var(--red);" onclick="event.stopPropagation(); deleteProject('${p.path.replace(/\\/g, '\\\\')}', '${p.name}')">Delete</button>
             </div>
         </div>
     `).join('');
@@ -759,6 +761,8 @@ async function openProject(path) {
         <button class="btn btn-blue btn-sm" onclick="launch('godot-editor', '${esc}')">Godot Editor</button>
         <button class="btn btn-blue btn-sm" onclick="launch('godot-run', '${esc}')">▶ Run Game</button>
         <button class="btn btn-outline btn-sm" onclick="launch('folder', '${esc}')">📁 Folder</button>
+        <button class="btn btn-outline btn-sm" onclick="exportProject('windows')">📦 Export Windows</button>
+        <button class="btn btn-outline btn-sm" onclick="exportProject('web')">🌐 Export Web</button>
     `;
 
     // Quick stats
@@ -1141,6 +1145,55 @@ function toast(message, type = 'info') {
     t.textContent = message;
     container.appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 4000);
+}
+
+// --- Project Management ---
+async function deleteProject(path, name) {
+    const deleteFiles = confirm(`Delete "${name}"?\n\nClick OK to remove from IDE only.\nThe files will remain on disk.`);
+    if (!deleteFiles && !confirm('Remove project from list?')) return;
+
+    const res = await fetch('/api/project/delete', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path, delete_files: false})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        toast(`Removed "${name}" from project list`, 'success');
+        loadProjects();
+    }
+}
+
+async function duplicateProject(path, name) {
+    const newName = prompt(`Duplicate "${name}" as:`, name + ' Copy');
+    if (!newName) return;
+
+    const res = await fetch('/api/project/duplicate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path, new_name: newName})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        toast(`Duplicated as "${newName}"`, 'success');
+        loadProjects();
+    } else {
+        toast(data.error || 'Duplicate failed', 'error');
+    }
+}
+
+async function exportProject(target) {
+    if (!currentProject) return;
+    toast(`Exporting for ${target}...`, 'info');
+
+    const res = await fetch('/api/project/export', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: currentProject, target})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        toast(`Exported! ${data.output} (${data.size_mb}MB)`, 'success');
+    } else {
+        toast(data.error || 'Export failed', 'error');
+    }
 }
 
 // --- Code Editor ---

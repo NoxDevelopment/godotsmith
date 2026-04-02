@@ -1250,6 +1250,175 @@ async def batch_dialogue(request: Request):
     return {"ok": False, "error": result.stderr[:500]}
 
 
+# --- API: Build/Export ---
+
+@app.post("/api/project/export")
+async def export_project(request: Request):
+    """Export a Godot project as Windows exe or HTML5."""
+    data = await request.json()
+    path = data.get("path", "")
+    target = data.get("target", "windows")  # windows, web, linux
+
+    cfg = load_config()
+    pf = Path(path) / "project.godot"
+    if not pf.exists():
+        return JSONResponse({"error": "No project.godot"}, status_code=400)
+
+    export_dir = Path(path) / "export" / target
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check for export_presets.cfg — create if missing
+    presets_file = Path(path) / "export_presets.cfg"
+    if not presets_file.exists():
+        # Create minimal export presets
+        presets = ""
+        if target == "windows":
+            presets = '''[preset.0]
+
+name="Windows Desktop"
+platform="Windows Desktop"
+runnable=true
+export_filter="all_resources"
+export_path="export/windows/game.exe"
+
+[preset.0.options]
+'''
+        elif target == "web":
+            presets = '''[preset.0]
+
+name="Web"
+platform="Web"
+runnable=true
+export_filter="all_resources"
+export_path="export/web/index.html"
+
+[preset.0.options]
+'''
+        elif target == "linux":
+            presets = '''[preset.0]
+
+name="Linux"
+platform="Linux"
+runnable=true
+export_filter="all_resources"
+export_path="export/linux/game.x86_64"
+
+[preset.0.options]
+'''
+        presets_file.write_text(presets)
+
+    # Determine output filename
+    filenames = {"windows": "game.exe", "web": "index.html", "linux": "game.x86_64"}
+    output_file = export_dir / filenames.get(target, "game.exe")
+
+    try:
+        # Try export — needs export templates installed in Godot
+        result = subprocess.run(
+            [cfg["godot_exe"], "--headless", "--export-all", "--path", path],
+            capture_output=True, text=True, timeout=120,
+        )
+
+        if output_file.exists():
+            return {
+                "ok": True,
+                "target": target,
+                "output": str(output_file),
+                "size_mb": round(output_file.stat().st_size / 1048576, 1),
+            }
+
+        # Export templates might not be installed
+        if "No export template" in result.stderr or "export template" in result.stderr.lower():
+            return {
+                "ok": False,
+                "error": "Export templates not installed. Open Godot > Editor > Manage Export Templates > Download.",
+                "output": result.stderr[:500],
+            }
+
+        return {"ok": False, "error": result.stderr[:500] or "Export failed", "output": result.stdout[:500]}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "Export timed out (120s)"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# --- API: Project Management ---
+
+@app.post("/api/project/delete")
+async def delete_project(request: Request):
+    """Remove a project from the registry (optionally delete files)."""
+    data = await request.json()
+    path = data.get("path", "")
+    delete_files = data.get("delete_files", False)
+
+    projects = load_projects()
+    projects = [p for p in projects if p["path"] != path]
+    save_projects(projects)
+
+    if delete_files and path and Path(path).exists():
+        shutil.rmtree(path)
+        return {"ok": True, "deleted_files": True, "path": path}
+
+    return {"ok": True, "deleted_files": False, "path": path}
+
+
+@app.post("/api/project/duplicate")
+async def duplicate_project(request: Request):
+    """Duplicate a project to a new folder."""
+    data = await request.json()
+    source_path = data.get("path", "")
+    new_name = data.get("new_name", "")
+
+    if not source_path or not new_name or not Path(source_path).exists():
+        return JSONResponse({"error": "Invalid source path or name"}, status_code=400)
+
+    cfg = load_config()
+    folder = new_name.lower().replace(" ", "-")
+    for ch in "!@#$%^&*()+=[]{}|\\:;<>,?/~`'\"":
+        folder = folder.replace(ch, "")
+    target = Path(cfg["projects_root"]) / folder
+
+    if target.exists():
+        return JSONResponse({"error": f"Folder {target} already exists"}, status_code=400)
+
+    # Copy everything except .git and .godot
+    shutil.copytree(source_path, str(target), ignore=shutil.ignore_patterns(".git", ".godot", "export"))
+
+    # Init fresh git
+    subprocess.run(["git", "init", "-q"], cwd=str(target), capture_output=True)
+
+    # Update project name in project.godot
+    pf = target / "project.godot"
+    if pf.exists():
+        content = pf.read_text()
+        content = content.replace(
+            f'config/name=',
+            f'config/name="{new_name}"\n; old_', 1
+        ) if f'config/name="{new_name}"' not in content else content
+        pf.write_text(content)
+
+    # Register new project
+    projects = load_projects()
+    # Find source project info
+    source_info = {}
+    for p in projects:
+        if p["path"] == source_path:
+            source_info = dict(p)
+            break
+
+    projects.insert(0, {
+        "name": new_name,
+        "path": str(target),
+        "engine": source_info.get("engine", "godot"),
+        "genre": source_info.get("genre", ""),
+        "concept": source_info.get("concept", ""),
+        "created": datetime.now().isoformat(),
+        "last_opened": datetime.now().isoformat(),
+    })
+    save_projects(projects)
+
+    return {"ok": True, "path": str(target), "name": new_name}
+
+
 @app.post("/api/regenerate-asset")
 async def regenerate_asset(request: Request):
     data = await request.json()

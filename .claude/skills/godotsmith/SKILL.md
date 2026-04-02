@@ -33,6 +33,7 @@ Read each sub-file from `${CLAUDE_SKILL_DIR}/` when you reach its pipeline stage
 | `rembg_matting.py` | Remove backgrounds from sprites using rembg + alpha matting | `rembg_matting.py input.png -o output.png` |
 | `spritesheet_slice.py` | Crop grid lines, split sprite sheets, remove backgrounds | `clean-bg sheet.png -o clean.png` |
 | `tripo3d.py` | Convert PNG to GLB 3D model via Tripo3D API | Used by asset_gen.py |
+| `build_export.py` | Export Godot project as Windows .exe, Web HTML5, or Linux | `export --project . --target windows` |
 
 ## Audio Generation Priority Chain
 
