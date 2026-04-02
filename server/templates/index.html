@@ -846,6 +846,7 @@ async function loadGitLog(path) {
 
 async function capturePreview() {
     if (!currentProject) return;
+    showLoading('Capturing screenshot...');
     document.getElementById('detail-build-status').textContent = 'Capturing...';
     const res = await fetch('/api/project/capture', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -860,6 +861,7 @@ async function capturePreview() {
     } else {
         document.getElementById('detail-build-status').textContent = 'Capture failed';
     }
+    hideLoading();
 }
 
 async function checkErrors() {
@@ -882,6 +884,7 @@ async function checkErrors() {
 
 async function buildScenes() {
     if (!currentProject) return;
+    showLoading('Rebuilding scenes...');
     document.getElementById('detail-build-status').textContent = 'Building...';
     const res = await fetch('/api/project/build-scenes', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -896,6 +899,7 @@ async function buildScenes() {
         document.getElementById('detail-build-status').textContent = 'Build failed';
         document.getElementById('detail-build-status').style.color = 'var(--red)';
     }
+    hideLoading();
 }
 
 async function updateTaskStatus(title, status) {
@@ -1025,6 +1029,7 @@ function selectTemplate(id, template) {
 async function createProject() {
     const name = document.getElementById('f-name').value.trim();
     if (!name) { alert('Enter a game name'); return; }
+    showLoading('Creating project...');
 
     const data = {
         name, engine: selectedEngine,
@@ -1042,17 +1047,17 @@ async function createProject() {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
     });
     const result = await res.json();
+    hideLoading();
     if (result.ok) {
         appendConsole('=== Project created: ' + name + ' ===\n' + result.prompt + '\n');
         showPage('projects');
-        // Launch Claude with the game prompt auto-sent
         fetch('/api/launch/claude', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({path: result.path, prompt: result.prompt})
         });
         toast('Project created! Claude Code launching with game prompt...', 'success');
     } else {
-        alert(result.error || 'Failed');
+        toast(result.error || 'Failed to create project', 'error');
     }
 }
 
@@ -1147,6 +1152,48 @@ function toast(message, type = 'info') {
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 4000);
 }
 
+// --- Loading overlay + button guard ---
+let _loadingCount = 0;
+let _loadingOverlay = null;
+
+function showLoading(message = 'Working...') {
+    _loadingCount++;
+    if (!_loadingOverlay) {
+        _loadingOverlay = document.createElement('div');
+        _loadingOverlay.id = 'global-loading';
+        _loadingOverlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:999;display:flex;align-items:center;justify-content:center;';
+        _loadingOverlay.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:24px 40px;text-align:center;">
+            <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 12px;"></div>
+            <div id="loading-message" style="color:var(--text);font-size:14px;">${message}</div>
+        </div>`;
+        document.body.appendChild(_loadingOverlay);
+    } else {
+        document.getElementById('loading-message').textContent = message;
+        _loadingOverlay.style.display = 'flex';
+    }
+}
+
+function hideLoading() {
+    _loadingCount = Math.max(0, _loadingCount - 1);
+    if (_loadingCount === 0 && _loadingOverlay) {
+        _loadingOverlay.style.display = 'none';
+    }
+}
+
+// Wrap async button handlers to prevent double-click and show loading
+function guardedAction(btn, message, asyncFn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const origText = btn.textContent;
+    btn.textContent = '...';
+    showLoading(message);
+    asyncFn().finally(() => {
+        hideLoading();
+        btn.disabled = false;
+        btn.textContent = origText;
+    });
+}
+
 // --- Project Management ---
 async function deleteProject(path, name) {
     const deleteFiles = confirm(`Delete "${name}"?\n\nClick OK to remove from IDE only.\nThe files will remain on disk.`);
@@ -1182,7 +1229,7 @@ async function duplicateProject(path, name) {
 
 async function exportProject(target) {
     if (!currentProject) return;
-    toast(`Exporting for ${target}...`, 'info');
+    showLoading(`Exporting for ${target}...`);
 
     const res = await fetch('/api/project/export', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -1194,6 +1241,7 @@ async function exportProject(target) {
     } else {
         toast(data.error || 'Export failed', 'error');
     }
+    hideLoading();
 }
 
 // --- Code Editor ---
@@ -1378,7 +1426,8 @@ async function createGithubRepo() {
     const priv = document.getElementById('gh-repo-private').checked;
     if (!name) { alert('Enter repo name'); return; }
 
-    document.getElementById('github-action-result').innerHTML = 'Creating repo...';
+    showLoading('Creating GitHub repo...');
+    document.getElementById('github-action-result').innerHTML = '';
     const res = await fetch('/api/github/create-repo', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({path, name, description: desc, private: priv})
@@ -1387,13 +1436,15 @@ async function createGithubRepo() {
     document.getElementById('github-action-result').innerHTML = data.ok
         ? `<span style="color:var(--accent);">✓ Created: <a href="${data.url}" target="_blank" style="color:var(--blue);">${data.url}</a></span>`
         : `<span style="color:var(--red);">${data.error}</span>`;
+    hideLoading();
     if (data.ok) loadGithubProject();
 }
 
 async function gitCommit() {
     const path = document.getElementById('github-project').value;
     const msg = document.getElementById('gh-commit-msg').value || 'Update from Godotsmith IDE';
-    document.getElementById('github-action-result').innerHTML = 'Committing...';
+    showLoading('Committing...');
+    document.getElementById('github-action-result').innerHTML = '';
     const res = await fetch('/api/github/commit', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({path, message: msg})
@@ -1401,13 +1452,14 @@ async function gitCommit() {
     const data = await res.json();
     document.getElementById('github-action-result').innerHTML = data.ok
         ? `<span style="color:var(--accent);">✓ Committed</span>` : `<span style="color:var(--red);">${data.error}</span>`;
+    hideLoading();
     loadGithubProject();
 }
 
 async function gitCommitAndPush() {
     await gitCommit();
     const path = document.getElementById('github-project').value;
-    document.getElementById('github-action-result').innerHTML += ' Pushing...';
+    showLoading('Pushing to GitHub...');
     const res = await fetch('/api/github/push', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({path})
@@ -1415,12 +1467,13 @@ async function gitCommitAndPush() {
     const data = await res.json();
     document.getElementById('github-action-result').innerHTML = data.ok
         ? `<span style="color:var(--accent);">✓ Committed & Pushed</span>` : `<span style="color:var(--red);">${data.error}</span>`;
+    hideLoading();
     loadGithubProject();
 }
 
 async function gitPull() {
     const path = document.getElementById('github-project').value;
-    document.getElementById('github-action-result').innerHTML = 'Pulling...';
+    showLoading('Pulling from GitHub...');
     const res = await fetch('/api/github/pull', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({path})
@@ -1428,6 +1481,7 @@ async function gitPull() {
     const data = await res.json();
     document.getElementById('github-action-result').innerHTML = data.ok
         ? `<span style="color:var(--accent);">✓ Pulled</span>` : `<span style="color:var(--red);">${data.error}</span>`;
+    hideLoading();
     loadGithubProject();
 }
 
@@ -1460,24 +1514,26 @@ async function generateSprite() {
     const filename = document.getElementById('sprite-filename').value || 'sprite.png';
     const spriteType = document.getElementById('sprite-type').value;
     const removeBg = document.getElementById('sprite-rembg').checked;
-
     if (!prompt) { alert('Enter a description'); return; }
 
+    showLoading('Generating sprite...');
     const resultDiv = document.getElementById('sprite-result');
-    resultDiv.innerHTML = '<div style="color:var(--accent);">Generating... (this may take 15-30 seconds)</div>';
-
-    const res = await fetch('/api/sprites/generate', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project_path: project, prompt, sprite_type: spriteType, filename, remove_bg: removeBg})
-    });
-    const data = await res.json();
-    if (data.ok) {
-        resultDiv.innerHTML = '<div style="color:var(--accent);">✓ Generated!</div>';
-        document.getElementById('sprite-preview').innerHTML = `<img src="/api/asset/${encodeURIComponent(data.path)}?t=${Date.now()}" style="max-width:100%; image-rendering:pixelated;">`;
-        loadSpriteProject();
-    } else {
-        resultDiv.innerHTML = `<div style="color:var(--red);">${data.error || 'Failed'}</div>`;
-    }
+    resultDiv.innerHTML = '';
+    try {
+        const res = await fetch('/api/sprites/generate', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_path: project, prompt, sprite_type: spriteType, filename, remove_bg: removeBg})
+        });
+        const data = await res.json();
+        if (data.ok) {
+            resultDiv.innerHTML = '<div style="color:var(--accent);">✓ Generated!</div>';
+            document.getElementById('sprite-preview').innerHTML = `<img src="/api/asset/${encodeURIComponent(data.path)}?t=${Date.now()}" style="max-width:100%; image-rendering:pixelated;">`;
+            loadSpriteProject();
+            toast('Sprite generated!', 'success');
+        } else {
+            resultDiv.innerHTML = `<div style="color:var(--red);">${data.error || 'Failed'}</div>`;
+        }
+    } finally { hideLoading(); }
 }
 
 // --- Character Creator ---
@@ -1487,23 +1543,25 @@ async function generateCharacter() {
     const desc = document.getElementById('char-desc').value;
     const style = document.getElementById('char-style').value;
     if (!desc) { alert('Enter a character description'); return; }
-
     const emotions = [];
     document.querySelectorAll('#char-emotions input:checked').forEach(cb => emotions.push(cb.value));
 
-    document.getElementById('char-result').innerHTML = `<div style="color:var(--accent);">Generating ${name} with ${emotions.length} expressions... (may take 1-2 minutes)</div>`;
-
-    const res = await fetch('/api/vnccs/generate-character', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project_path: project, character_name: name, description: desc, art_style: style, emotions})
-    });
-    const data = await res.json();
-    if (data.ok) {
-        document.getElementById('char-result').innerHTML = `<span style="color:var(--accent);">✓ Generated ${data.total_files} images for ${name}</span>`;
-        loadCharacterGallery();
-    } else {
-        document.getElementById('char-result').innerHTML = `<span style="color:var(--red);">${data.error || 'Failed'}</span>`;
-    }
+    showLoading(`Generating ${name} (${emotions.length} expressions)...`);
+    document.getElementById('char-result').innerHTML = '';
+    try {
+        const res = await fetch('/api/vnccs/generate-character', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_path: project, character_name: name, description: desc, art_style: style, emotions})
+        });
+        const data = await res.json();
+        if (data.ok) {
+            document.getElementById('char-result').innerHTML = `<span style="color:var(--accent);">✓ Generated ${data.total_files} images</span>`;
+            loadCharacterGallery();
+            toast(`Character "${name}" generated!`, 'success');
+        } else {
+            document.getElementById('char-result').innerHTML = `<span style="color:var(--red);">${data.error || 'Failed'}</span>`;
+        }
+    } finally { hideLoading(); }
 }
 
 async function loadCharacterGallery() {
@@ -1591,18 +1649,22 @@ async function studioGenerateSFX() {
     const project = document.getElementById('audio-project').value;
     const sfxType = document.getElementById('sfx-type').value;
     const duration = document.getElementById('sfx-duration').value;
+    const pitch = document.getElementById('sfx-pitch')?.value || '1.0';
+    const reverb = document.getElementById('sfx-reverb')?.value || '0';
     const filename = document.getElementById('sfx-filename').value || `${sfxType}.wav`;
-    document.getElementById('sfx-result').innerHTML = 'Generating...';
 
-    const res = await fetch('/api/audio/generate-sfx', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project_path: project, sfx_type: sfxType, duration: parseFloat(duration), filename})
-    });
-    const data = await res.json();
-    document.getElementById('sfx-result').innerHTML = data.ok
-        ? `<span style="color:var(--accent);">✓ ${filename}</span>`
-        : `<span style="color:var(--red);">${data.error}</span>`;
-    if (data.ok) loadAudioProject();
+    showLoading('Generating SFX...');
+    try {
+        const res = await fetch('/api/audio/generate-sfx', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_path: project, sfx_type: sfxType, duration: parseFloat(duration), filename})
+        });
+        const data = await res.json();
+        document.getElementById('sfx-result').innerHTML = data.ok
+            ? `<span style="color:var(--accent);">✓ ${filename}</span>`
+            : `<span style="color:var(--red);">${data.error}</span>`;
+        if (data.ok) { loadAudioProject(); toast('SFX generated!', 'success'); }
+    } finally { hideLoading(); }
 }
 
 async function studioGenerateMusic() {
@@ -1612,17 +1674,19 @@ async function studioGenerateMusic() {
     const key = document.getElementById('music-key').value;
     const duration = document.getElementById('music-duration').value;
     const filename = document.getElementById('music-filename').value || 'bgm.wav';
-    document.getElementById('music-result').innerHTML = 'Generating...';
 
-    const res = await fetch('/api/audio/generate-music', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project_path: project, mood, tempo: parseInt(tempo), key, duration: parseInt(duration), filename})
-    });
-    const data = await res.json();
-    document.getElementById('music-result').innerHTML = data.ok
-        ? `<span style="color:var(--accent);">✓ ${filename}</span>`
-        : `<span style="color:var(--red);">${data.error}</span>`;
-    if (data.ok) loadAudioProject();
+    showLoading('Composing music...');
+    try {
+        const res = await fetch('/api/audio/generate-music', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_path: project, mood, tempo: parseInt(tempo), key, duration: parseInt(duration), filename})
+        });
+        const data = await res.json();
+        document.getElementById('music-result').innerHTML = data.ok
+            ? `<span style="color:var(--accent);">✓ ${filename}</span>`
+            : `<span style="color:var(--red);">${data.error}</span>`;
+        if (data.ok) { loadAudioProject(); toast('Music generated!', 'success'); }
+    } finally { hideLoading(); }
 }
 
 async function studioGenerateTTS() {
@@ -1630,19 +1694,23 @@ async function studioGenerateTTS() {
     const text = document.getElementById('tts-text').value;
     const voice = document.getElementById('tts-voice').value;
     const speed = document.getElementById('tts-speed').value;
+    const emotion = document.getElementById('tts-emotion')?.value || '';
+    const backend = document.getElementById('tts-backend')?.value || 'auto';
     const filename = document.getElementById('tts-filename').value || 'dialogue.mp3';
     if (!text) { alert('Enter text'); return; }
-    document.getElementById('tts-result').innerHTML = 'Generating...';
 
-    const res = await fetch('/api/audio/generate-tts', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project_path: project, text, voice, speed: parseFloat(speed), filename})
-    });
-    const data = await res.json();
-    document.getElementById('tts-result').innerHTML = data.ok
-        ? `<span style="color:var(--accent);">✓ ${filename}</span>`
-        : `<span style="color:var(--red);">${data.error}</span>`;
-    if (data.ok) loadAudioProject();
+    showLoading('Generating speech...');
+    try {
+        const res = await fetch('/api/audio/generate-tts', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_path: project, text, voice, speed: parseFloat(speed), filename})
+        });
+        const data = await res.json();
+        document.getElementById('tts-result').innerHTML = data.ok
+            ? `<span style="color:var(--accent);">✓ ${filename}</span>`
+            : `<span style="color:var(--red);">${data.error}</span>`;
+        if (data.ok) { loadAudioProject(); toast('Speech generated!', 'success'); }
+    } finally { hideLoading(); }
 }
 
 // --- Freesound ---
@@ -1680,12 +1748,14 @@ async function downloadFreesound(soundId, name) {
     const project = document.getElementById('audio-project').value;
     if (!project) { alert('Select a project first'); return; }
 
+    showLoading('Downloading sound...');
     const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40) + '.mp3';
     const res = await fetch('/api/freesound/download', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({sound_id: soundId, project_path: project, filename: safeName})
     });
     const data = await res.json();
+    hideLoading();
     if (data.ok) {
         toast(`Downloaded: ${safeName}`, 'success');
         loadAudioProject();
