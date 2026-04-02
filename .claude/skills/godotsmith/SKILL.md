@@ -19,8 +19,30 @@ Read each sub-file from `${CLAUDE_SKILL_DIR}/` when you reach its pipeline stage
 | `scaffold.md` | Design architecture and produce compilable Godot skeleton |
 | `asset-planner.md` | Decide what assets the game needs within a budget |
 | `asset-gen.md` | Generate PNGs (ComfyUI local / Gemini cloud) and GLBs (Tripo3D) |
-| `audio-gen.md` | Generate sound effects, music, and dialogue audio |
+| `audio-gen.md` | Generate SFX (20 types), music (scales/chords/instruments), dialogue (Orpheus/Kokoro/EdgeTTS with emotions) |
 | `animation-gen.md` | Generate animated sprites via video models (AnimateDiff/SVD/Wan) |
+
+## Additional Tools (in `${CLAUDE_SKILL_DIR}/tools/`)
+
+| Tool | Purpose | CLI |
+|------|---------|-----|
+| `freesound_client.py` | Search & download from 500K+ free CC sound effects on Freesound.org | `search "sword clash"`, `download 12345 -o sfx.mp3`, `batch "footstep" -o dir/` |
+| `batch_dialogue.py` | Import CSV/JSON of NPC lines → batch generate all TTS audio | `batch_dialogue.py lines.csv --project .` |
+| `palette_gen.py` | Generate consistent color palettes (10 presets: fantasy, ocean, desert, neon, etc.) | `generate --preset ocean --gdscript scripts/colors.gd` |
+| `comfyui_client.py` | Direct ComfyUI REST API client for custom workflows | Used by asset_gen.py internally |
+| `rembg_matting.py` | Remove backgrounds from sprites using rembg + alpha matting | `rembg_matting.py input.png -o output.png` |
+| `spritesheet_slice.py` | Crop grid lines, split sprite sheets, remove backgrounds | `clean-bg sheet.png -o clean.png` |
+| `tripo3d.py` | Convert PNG to GLB 3D model via Tripo3D API | Used by asset_gen.py |
+
+## Audio Generation Priority Chain
+
+TTS backends (tried in order): **Orpheus** (emotional, `<laugh>` `<sigh>` `<gasp>` tags) → **Kokoro** (fast, local) → **EdgeTTS** (most voices, 11 emotion styles via SSML)
+
+When generating game audio:
+1. **Real SFX first** — search Freesound.org for high-quality CC sounds before procedural
+2. **Procedural SFX** — 20 types with pitch/reverb controls for quick prototyping
+3. **Music** — use scales, instruments, chord progressions, 4-layer composition
+4. **Dialogue** — batch generate from CSV/JSON for efficiency
 
 ## Pipeline
 

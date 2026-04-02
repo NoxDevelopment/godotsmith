@@ -1026,7 +1026,12 @@ async function createProject() {
     if (result.ok) {
         appendConsole('=== Project created: ' + name + ' ===\n' + result.prompt + '\n');
         showPage('projects');
-        launch('claude', result.path);
+        // Launch Claude with the game prompt auto-sent
+        fetch('/api/launch/claude', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path: result.path, prompt: result.prompt})
+        });
+        toast('Project created! Claude Code launching with game prompt...', 'success');
     } else {
         alert(result.error || 'Failed');
     }

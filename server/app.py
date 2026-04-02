@@ -1140,6 +1140,110 @@ async def git_pull(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+# --- API: Freesound ---
+
+@app.get("/api/freesound/search")
+async def freesound_search(q: str = "", limit: int = 15, page: int = 1):
+    """Search Freesound.org for sound effects."""
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "freesound_client.py"), "search", q,
+         "--limit", str(limit), "--page", str(page)],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+    return {"error": result.stderr or "Search failed", "sounds": []}
+
+
+@app.post("/api/freesound/download")
+async def freesound_download(request: Request):
+    """Download a Freesound preview into a project."""
+    data = await request.json()
+    sound_id = data.get("sound_id")
+    project_path = data.get("project_path", "")
+    filename = data.get("filename", f"freesound_{sound_id}.mp3")
+
+    output = Path(project_path) / "assets" / "audio" / filename
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "freesound_client.py"), "download",
+         str(sound_id), "-o", str(output)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+    return {"ok": False, "error": result.stderr or "Download failed"}
+
+
+# --- API: Color Palette ---
+
+@app.get("/api/palette/presets")
+async def palette_presets():
+    """List available palette presets."""
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "palette_gen.py"), "list"],
+        capture_output=True, text=True, timeout=5,
+    )
+    return {"presets": result.stdout.strip().splitlines()}
+
+
+@app.post("/api/palette/generate")
+async def generate_palette(request: Request):
+    """Generate a color palette."""
+    data = await request.json()
+    preset = data.get("preset", "fantasy_rpg")
+    variant = data.get("variant", "balanced")
+    project_path = data.get("project_path", "")
+
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    cmd = [sys.executable, str(tools_dir / "palette_gen.py"), "generate",
+           "--preset", preset, "--variant", variant]
+
+    if project_path:
+        json_out = Path(project_path) / "assets" / "palette.json"
+        gd_out = Path(project_path) / "scripts" / "palette_colors.gd"
+        cmd.extend(["-o", str(json_out), "--gdscript", str(gd_out)])
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+    return {"error": result.stderr}
+
+
+# --- API: Batch Dialogue ---
+
+@app.post("/api/audio/batch-dialogue")
+async def batch_dialogue(request: Request):
+    """Generate TTS for multiple dialogue lines from JSON."""
+    data = await request.json()
+    project_path = data.get("project_path", "")
+    lines = data.get("lines", [])  # [{character, text, voice, emotion, filename}]
+
+    if not lines:
+        return JSONResponse({"error": "No dialogue lines"}, status_code=400)
+
+    # Write temp JSON file
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(lines, f)
+        tmp_path = f.name
+
+    tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    result = subprocess.run(
+        [sys.executable, str(tools_dir / "batch_dialogue.py"), tmp_path, "--project", project_path],
+        capture_output=True, text=True, timeout=600,  # 10 min for large batches
+    )
+
+    os.unlink(tmp_path)
+
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+    return {"ok": False, "error": result.stderr[:500]}
+
+
 @app.post("/api/regenerate-asset")
 async def regenerate_asset(request: Request):
     data = await request.json()
@@ -1432,10 +1536,29 @@ async def launch_action(action: str, request: Request):
     cfg = load_config()
 
     if action == "claude":
-        cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && claude"]
+        prompt = data.get("prompt", "")
+        claude_args = "claude"
         if cfg.get("auto_approve"):
+            claude_args = "claude --dangerously-skip-permissions"
+
+        if prompt:
+            # Auto-send the game prompt to Claude Code via --print flag and pipe
+            # Write prompt to a temp file and use claude -p to send it
+            import tempfile
+            prompt_file = Path(path) / "GAME_PROMPT.md"
+            if prompt_file.exists():
+                prompt_text = prompt_file.read_text()
+            else:
+                prompt_text = prompt
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=path) as f:
+                f.write(prompt_text)
+                tmp = f.name
+
             cmd = ["cmd", "/c", "start", "cmd", "/k",
-                   f"cd /d {path} && claude --dangerously-skip-permissions"]
+                   f"cd /d {path} && type {Path(tmp).name} | {claude_args} && del {Path(tmp).name}"]
+        else:
+            cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && {claude_args}"]
         subprocess.Popen(cmd, shell=False)
         return {"ok": True}
 
