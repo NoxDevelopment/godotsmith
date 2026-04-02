@@ -258,21 +258,21 @@ async def get_project_detail(path: str):
             tasks.append(current_task)
         detail["tasks"] = tasks
 
-    # List assets
+    # List assets (fast — no stat calls unless needed)
     assets = {"images": [], "audio": [], "models": []}
     img_dir = p / "assets" / "img"
     if img_dir.exists():
         for f in sorted(img_dir.glob("*.png")):
-            assets["images"].append({"name": f.name, "path": str(f), "size": f.stat().st_size})
+            assets["images"].append({"name": f.name, "path": str(f), "size": 0})
     audio_dir = p / "assets" / "audio"
     if audio_dir.exists():
         for f in sorted(audio_dir.iterdir()):
             if f.suffix in (".wav", ".mp3", ".ogg"):
-                assets["audio"].append({"name": f.name, "path": str(f), "size": f.stat().st_size})
+                assets["audio"].append({"name": f.name, "path": str(f), "size": 0})
     glb_dir = p / "assets" / "glb"
     if glb_dir.exists():
         for f in sorted(glb_dir.glob("*.glb")):
-            assets["models"].append({"name": f.name, "path": str(f), "size": f.stat().st_size})
+            assets["models"].append({"name": f.name, "path": str(f), "size": 0})
     detail["assets"] = assets
 
     # Screenshots

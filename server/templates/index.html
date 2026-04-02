@@ -749,9 +749,11 @@ async function loadProjects() {
 
 async function openProject(path) {
     currentProject = path;
+    showLoading('Loading project...');
     const ep = encodeURIComponent(path);
     const res = await fetch('/api/project/' + ep);
     const detail = await res.json();
+    hideLoading();
     const esc = path.replace(/\\/g, '\\\\');
 
     document.getElementById('detail-name').textContent = path.split(/[/\\]/).pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -778,12 +780,10 @@ async function openProject(path) {
     document.getElementById('detail-image-count').textContent = images.length;
     document.getElementById('detail-audio-count').textContent = audio.length;
     document.getElementById('detail-task-count').textContent = `${done}/${tasks.length}`;
-    document.getElementById('detail-build-status').textContent = 'Checking...';
+    document.getElementById('detail-build-status').textContent = 'Click to check';
+    document.getElementById('detail-build-status').style.color = 'var(--text-dim)';
     document.getElementById('detail-errors').style.display = 'none';
     document.getElementById('detail-preview').style.display = 'none';
-
-    // Check build status async
-    checkErrors();
 
     // Design doc
     document.getElementById('design-doc').textContent = detail.game_prompt_md || detail.plan_md || 'No design document found.';
