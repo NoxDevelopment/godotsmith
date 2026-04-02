@@ -1145,11 +1145,14 @@ async def git_pull(request: Request):
 @app.get("/api/freesound/search")
 async def freesound_search(q: str = "", limit: int = 15, page: int = 1):
     """Search Freesound.org for sound effects."""
+    cfg = load_config()
     tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    env = dict(os.environ)
+    env["FREESOUND_API_KEY"] = cfg.get("freesound_api_key", "")
     result = subprocess.run(
         [sys.executable, str(tools_dir / "freesound_client.py"), "search", q,
          "--limit", str(limit), "--page", str(page)],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True, text=True, timeout=15, env=env,
     )
     if result.returncode == 0:
         return json.loads(result.stdout)
@@ -1164,13 +1167,16 @@ async def freesound_download(request: Request):
     project_path = data.get("project_path", "")
     filename = data.get("filename", f"freesound_{sound_id}.mp3")
 
+    cfg = load_config()
     output = Path(project_path) / "assets" / "audio" / filename
     tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+    env = dict(os.environ)
+    env["FREESOUND_API_KEY"] = cfg.get("freesound_api_key", "")
 
     result = subprocess.run(
         [sys.executable, str(tools_dir / "freesound_client.py"), "download",
          str(sound_id), "-o", str(output)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=30, env=env,
     )
     if result.returncode == 0:
         return json.loads(result.stdout)

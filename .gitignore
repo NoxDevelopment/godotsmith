@@ -1,0 +1,4 @@
+launcher_config.json
+projects.json
+__pycache__/
+*.pyc

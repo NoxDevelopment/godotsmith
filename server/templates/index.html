@@ -492,6 +492,17 @@
                 </div>
             </div>
 
+            <!-- Freesound Search -->
+            <div style="margin-top:24px; max-width:1000px;">
+                <div style="font-size:18px; font-weight:600; margin-bottom:8px;">🔍 Freesound.org — 500K+ Free Sound Effects</div>
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <input class="form-input" id="fs-search" placeholder="Search sounds... (e.g., sword clash, footstep, explosion)" style="flex:1;"
+                           onkeydown="if(event.key==='Enter')searchFreesound()">
+                    <button class="btn btn-accent" onclick="searchFreesound()">Search</button>
+                </div>
+                <div id="fs-results"></div>
+            </div>
+
             <!-- Project Audio Files -->
             <div style="margin-top:24px;">
                 <div style="font-size:16px; font-weight:600; margin-bottom:8px;">Project Audio Files</div>
@@ -657,6 +668,10 @@
                 <div class="form-group">
                     <label>Kokoro TTS Port</label>
                     <input class="form-input" id="s-kokoro_port" type="number">
+                </div>
+                <div class="form-group">
+                    <label>Freesound API Key <span style="font-size:11px; color:var(--text-muted);">(<a href="https://freesound.org/apiv2/apply/" target="_blank" style="color:var(--blue);">get free key</a>)</span></label>
+                    <input class="form-input" id="s-freesound_api_key" type="password" placeholder="Your Freesound API key">
                 </div>
                 <div class="form-group">
                     <label>Claude Model</label>
@@ -1080,7 +1095,7 @@ async function launch(action, path) {
 async function loadSettings() {
     const res = await fetch('/api/settings');
     const cfg = await res.json();
-    ['projects_root','comfyui_path','comfyui_port','godot_exe','unity_exe','unreal_exe','kokoro_port','claude_model'].forEach(k => {
+    ['projects_root','comfyui_path','comfyui_port','godot_exe','unity_exe','unreal_exe','kokoro_port','claude_model','freesound_api_key'].forEach(k => {
         const el = document.getElementById('s-' + k);
         if (el) el.value = cfg[k] || '';
     });
@@ -1089,7 +1104,7 @@ async function loadSettings() {
 
 async function saveSettings() {
     const cfg = {};
-    ['projects_root','comfyui_path','godot_exe','unity_exe','unreal_exe','claude_model'].forEach(k => {
+    ['projects_root','comfyui_path','godot_exe','unity_exe','unreal_exe','claude_model','freesound_api_key'].forEach(k => {
         cfg[k] = document.getElementById('s-' + k).value;
     });
     cfg.comfyui_port = parseInt(document.getElementById('s-comfyui_port').value) || 8188;
@@ -1575,6 +1590,55 @@ async function studioGenerateTTS() {
         ? `<span style="color:var(--accent);">✓ ${filename}</span>`
         : `<span style="color:var(--red);">${data.error}</span>`;
     if (data.ok) loadAudioProject();
+}
+
+// --- Freesound ---
+async function searchFreesound() {
+    const q = document.getElementById('fs-search').value;
+    if (!q) return;
+    document.getElementById('fs-results').innerHTML = '<div class="spinner"></div> Searching Freesound...';
+
+    const res = await fetch('/api/freesound/search?q=' + encodeURIComponent(q) + '&limit=12');
+    const data = await res.json();
+
+    if (data.error) {
+        document.getElementById('fs-results').innerHTML = `<div style="color:var(--red);">${data.error}</div>`;
+        return;
+    }
+
+    const sounds = data.sounds || [];
+    document.getElementById('fs-results').innerHTML = `
+        <div style="color:var(--text-dim); margin-bottom:8px;">${data.count} results found</div>
+        ${sounds.map(s => `
+            <div class="audio-item" style="flex-wrap:wrap;">
+                <div style="min-width:200px;">
+                    <div style="font-weight:600; font-size:13px;">${s.name}</div>
+                    <div style="font-size:11px; color:var(--text-muted);">by ${s.author} · ${s.duration}s · ★${s.rating.toFixed(1)}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">${s.tags.join(', ')}</div>
+                </div>
+                ${s.preview_url ? `<audio controls preload="none" src="${s.preview_url}" style="height:32px;"></audio>` : ''}
+                <button class="btn btn-accent btn-sm" onclick="downloadFreesound(${s.id}, '${s.name.replace(/'/g,"\\'")}')">+ Add to Project</button>
+            </div>
+        `).join('')}
+    `;
+}
+
+async function downloadFreesound(soundId, name) {
+    const project = document.getElementById('audio-project').value;
+    if (!project) { alert('Select a project first'); return; }
+
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40) + '.mp3';
+    const res = await fetch('/api/freesound/download', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sound_id: soundId, project_path: project, filename: safeName})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        toast(`Downloaded: ${safeName}`, 'success');
+        loadAudioProject();
+    } else {
+        toast(data.error || 'Download failed', 'error');
+    }
 }
 
 // --- Curated Catalog ---
