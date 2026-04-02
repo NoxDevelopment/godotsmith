@@ -1754,14 +1754,16 @@ async def launch_action(action: str, request: Request):
                 prompt_text = ""
 
             if prompt_text:
-                # Claude Code accepts prompt as positional arg: claude "prompt text"
-                # Escape quotes in the prompt for cmd
-                safe_prompt = prompt_text.replace('"', '\\"').replace('\n', ' ').replace('\r', '')
-                # Truncate if too long for command line (max ~8000 chars)
-                if len(safe_prompt) > 4000:
-                    safe_prompt = safe_prompt[:4000] + "... (see GAME_PROMPT.md and PLAN.md for full context)"
+                # Write a short continuation hint into CLAUDE.md appendix
+                # so Claude sees it immediately on startup
+                cont_file = Path(path) / "CONTINUE_PROMPT.md"
+                cont_file.write_text(prompt_text)
+
+                # Build a short safe prompt for the command line
+                # Keep it under 200 chars to avoid cmd escaping issues
+                short = "Read CONTINUE_PROMPT.md and proceed with the tasks listed there."
                 cmd = ["cmd", "/c", "start", "cmd", "/k",
-                       f'cd /d {path} && {claude_args} "{safe_prompt}"']
+                       f'cd /d {path} && {claude_args} "{short}"']
             else:
                 cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && {claude_args}"]
         else:
