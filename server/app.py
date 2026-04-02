@@ -1754,11 +1754,14 @@ async def launch_action(action: str, request: Request):
                 prompt_text = ""
 
             if prompt_text:
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=path) as f:
-                    f.write(prompt_text)
-                    tmp = f.name
+                # Claude Code accepts prompt as positional arg: claude "prompt text"
+                # Escape quotes in the prompt for cmd
+                safe_prompt = prompt_text.replace('"', '\\"').replace('\n', ' ').replace('\r', '')
+                # Truncate if too long for command line (max ~8000 chars)
+                if len(safe_prompt) > 4000:
+                    safe_prompt = safe_prompt[:4000] + "... (see GAME_PROMPT.md and PLAN.md for full context)"
                 cmd = ["cmd", "/c", "start", "cmd", "/k",
-                       f"cd /d {path} && type {Path(tmp).name} | {claude_args} && del {Path(tmp).name}"]
+                       f'cd /d {path} && {claude_args} "{safe_prompt}"']
             else:
                 cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && {claude_args}"]
         else:
