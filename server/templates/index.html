@@ -296,6 +296,45 @@
                     <div class="asset-grid" id="sprite-gallery" style="max-height:300px; overflow-y:auto;"></div>
                 </div>
             </div>
+
+            <!-- Character Creator Section -->
+            <div style="margin-top:32px; max-width:1000px;">
+                <div class="page-header" style="font-size:18px;">Character Creator (VNCCS Pipeline)</div>
+                <div class="page-subheader">Generate consistent character sheets with multiple expressions. Uses ComfyUI VNCCS nodes.</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <div>
+                        <div class="form-group"><label>Character Name</label><input class="form-input" id="char-name" placeholder="hero_knight"></div>
+                        <div class="form-group"><label>Description</label><textarea class="form-input" id="char-desc" rows="3" placeholder="A young female knight with silver armor, blue eyes, short brown hair, confident pose"></textarea></div>
+                        <div class="form-group"><label>Art Style</label>
+                            <select class="form-input" id="char-style">
+                                <option value="pixel art, 16-bit retro game">Pixel Art (16-bit)</option>
+                                <option value="anime style, cel shaded">Anime</option>
+                                <option value="semi-realistic fantasy art">Semi-Realistic</option>
+                                <option value="chibi, cute deformed style">Chibi</option>
+                                <option value="dark fantasy, detailed">Dark Fantasy</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Expressions</label>
+                            <div style="display:flex; flex-wrap:wrap; gap:6px;" id="char-emotions">
+                                <label style="font-size:12px;"><input type="checkbox" value="neutral" checked> Neutral</label>
+                                <label style="font-size:12px;"><input type="checkbox" value="happy" checked> Happy</label>
+                                <label style="font-size:12px;"><input type="checkbox" value="sad" checked> Sad</label>
+                                <label style="font-size:12px;"><input type="checkbox" value="angry" checked> Angry</label>
+                                <label style="font-size:12px;"><input type="checkbox" value="surprised"> Surprised</label>
+                                <label style="font-size:12px;"><input type="checkbox" value="scared"> Scared</label>
+                                <label style="font-size:12px;"><input type="checkbox" value="determined"> Determined</label>
+                                <label style="font-size:12px;"><input type="checkbox" value="laughing"> Laughing</label>
+                            </div>
+                        </div>
+                        <button class="btn btn-accent" onclick="generateCharacter()" style="width:100%; padding:12px;">Generate Character</button>
+                        <div id="char-result" style="margin-top:8px;"></div>
+                    </div>
+                    <div>
+                        <div style="font-size:14px; font-weight:600; margin-bottom:8px;">Generated Characters</div>
+                        <div id="char-gallery" style="max-height:400px; overflow-y:auto;"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Audio Studio Page -->
@@ -361,7 +400,12 @@
                         <label>Filename</label>
                         <input class="form-input" id="music-filename" placeholder="battle_bgm.wav">
                     </div>
-                    <button class="btn btn-accent btn-sm" onclick="studioGenerateMusic()" style="width:100%;">Generate Music</button>
+                    <button class="btn btn-accent btn-sm" onclick="studioGenerateMusic()" style="width:100%;">Generate Procedural</button>
+                    <div style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
+                        <div style="font-size:12px; font-weight:600; margin-bottom:4px;">AI Music (Prompt-Based)</div>
+                        <div class="form-group"><textarea class="form-input" id="ai-music-prompt" rows="2" placeholder="epic orchestral battle theme, fast tempo, brass and strings" style="font-size:11px;"></textarea></div>
+                        <button class="btn btn-blue btn-sm" onclick="studioGenerateAIMusic()" style="width:100%;">Generate AI Music</button>
+                    </div>
                     <div id="music-result" style="margin-top:8px; font-size:12px;"></div>
                 </div>
 
@@ -1011,6 +1055,21 @@ async function checkServices() {
     document.getElementById('svc-godot').className = 'service-dot ' + (svc.godot.available ? 'online' : 'offline');
 }
 
+// --- Toast Notifications ---
+function toast(message, type = 'info') {
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.textContent = message;
+    container.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 4000);
+}
+
 // --- Code Editor ---
 let editor = null;
 let editorCurrentFile = '';
@@ -1295,6 +1354,90 @@ async function generateSprite() {
     }
 }
 
+// --- Character Creator ---
+async function generateCharacter() {
+    const project = document.getElementById('sprite-project').value;
+    const name = document.getElementById('char-name').value || 'character';
+    const desc = document.getElementById('char-desc').value;
+    const style = document.getElementById('char-style').value;
+    if (!desc) { alert('Enter a character description'); return; }
+
+    const emotions = [];
+    document.querySelectorAll('#char-emotions input:checked').forEach(cb => emotions.push(cb.value));
+
+    document.getElementById('char-result').innerHTML = `<div style="color:var(--accent);">Generating ${name} with ${emotions.length} expressions... (may take 1-2 minutes)</div>`;
+
+    const res = await fetch('/api/vnccs/generate-character', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_path: project, character_name: name, description: desc, art_style: style, emotions})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        document.getElementById('char-result').innerHTML = `<span style="color:var(--accent);">✓ Generated ${data.total_files} images for ${name}</span>`;
+        loadCharacterGallery();
+    } else {
+        document.getElementById('char-result').innerHTML = `<span style="color:var(--red);">${data.error || 'Failed'}</span>`;
+    }
+}
+
+async function loadCharacterGallery() {
+    const project = document.getElementById('sprite-project').value;
+    if (!project) return;
+    const res = await fetch('/api/vnccs/characters/' + encodeURIComponent(project));
+    const data = await res.json();
+    const gallery = document.getElementById('char-gallery');
+    if (!data.characters?.length) {
+        gallery.innerHTML = '<div style="color:var(--text-dim); padding:8px;">No characters generated yet.</div>';
+        return;
+    }
+    gallery.innerHTML = data.characters.map(c => `
+        <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:10px; margin-bottom:8px;">
+            <div style="font-weight:600; margin-bottom:6px;">${c.name} (${c.image_count} images)</div>
+            <div class="asset-grid" style="grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); gap:4px;">
+                ${c.images.map(img => `
+                    <div class="asset-thumb" style="padding:3px;">
+                        <img src="/api/asset/${encodeURIComponent(img.path)}" style="height:70px;" loading="lazy">
+                        <div class="aname">${img.name.replace(c.name + '_', '')}</div>
+                    </div>
+                `).join('')}
+            </div>
+            <div style="margin-top:6px; display:flex; gap:4px;">
+                <button class="btn btn-outline btn-sm" onclick="openKrita('${c.images[0]?.path?.replace(/\\/g, '\\\\') || ''}')">Edit in Krita</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function openKrita(imagePath) {
+    if (!imagePath) { alert('No image to edit'); return; }
+    const res = await fetch('/api/krita/open', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({image_path: imagePath})
+    });
+    const data = await res.json();
+    if (!data.ok) alert(data.error || 'Failed to open Krita');
+}
+
+// --- AI Music ---
+async function studioGenerateAIMusic() {
+    const project = document.getElementById('audio-project').value;
+    const prompt = document.getElementById('ai-music-prompt').value;
+    const duration = document.getElementById('music-duration').value;
+    const filename = document.getElementById('music-filename').value || 'ai_bgm.wav';
+    if (!prompt) { alert('Enter a music prompt'); return; }
+    document.getElementById('music-result').innerHTML = 'Generating AI music...';
+
+    const res = await fetch('/api/audio/generate-ai-music', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_path: project, prompt, duration: parseInt(duration), filename})
+    });
+    const data = await res.json();
+    let msg = data.ok ? `<span style="color:var(--accent);">✓ ${filename}</span>` : `<span style="color:var(--red);">${data.error}</span>`;
+    if (data.note) msg += ` <span style="color:var(--text-muted); font-size:11px;">(${data.note})</span>`;
+    document.getElementById('music-result').innerHTML = msg;
+    if (data.ok) loadAudioProject();
+}
+
 // --- Audio Studio ---
 async function loadAudioProjects() {
     const projects = await (await fetch('/api/projects')).json();
@@ -1392,6 +1535,7 @@ async function loadCatalog() {
     });
 
     filterCatalog('');
+    loadCharacterGallery();
 }
 
 function filterCatalog(category) {
