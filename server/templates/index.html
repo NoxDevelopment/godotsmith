@@ -57,7 +57,8 @@
         </div>
         <div class="sidebar-services" id="services-panel">
             <div class="service-line"><span class="service-dot offline" id="svc-comfyui"></span>ComfyUI</div>
-            <div class="service-line"><span class="service-dot offline" id="svc-kokoro"></span>Kokoro TTS</div>
+            <div class="service-line"><span class="service-dot offline" id="svc-orpheus"></span>Orpheus</div>
+            <div class="service-line"><span class="service-dot offline" id="svc-kokoro"></span>Kokoro</div>
             <div class="service-line"><span class="service-dot offline" id="svc-godot"></span>Godot</div>
         </div>
     </div>
@@ -474,8 +475,19 @@
                         <div class="form-group" style="flex:1;"><label>Pitch <span id="tts-pitch-val">0Hz</span></label><input class="form-input" id="tts-pitch" type="range" min="-50" max="50" step="5" value="0" oninput="document.getElementById('tts-pitch-val').textContent=this.value+'Hz'"></div>
                     </div>
                     <div class="form-group"><label>Volume <span id="tts-vol-val">1.0x</span></label><input class="form-input" id="tts-volume" type="range" min="0.5" max="1.5" step="0.1" value="1" oninput="document.getElementById('tts-vol-val').textContent=this.value+'x'"></div>
+                    <div class="form-group"><label>Backend</label>
+                        <select class="form-input" id="tts-backend">
+                            <option value="auto">Auto (Orpheus → Kokoro → EdgeTTS)</option>
+                            <option value="orpheus">Orpheus (emotional, local, best quality)</option>
+                            <option value="kokoro">Kokoro (fast, local)</option>
+                            <option value="edge_tts">EdgeTTS (cloud, free, most voices)</option>
+                        </select>
+                    </div>
                     <div class="form-group"><label>Filename</label><input class="form-input" id="tts-filename" placeholder="npc_greeting.mp3"></div>
                     <button class="btn btn-accent btn-sm" onclick="studioGenerateTTS()" style="width:100%;">Generate Speech</button>
+                    <div style="margin-top:6px; font-size:10px; color:var(--text-muted);">
+                        Tip: Orpheus supports emotion tags in text: &lt;laugh&gt; &lt;sigh&gt; &lt;gasp&gt; &lt;breath&gt;
+                    </div>
                     <div id="tts-result" style="margin-top:8px; font-size:12px;"></div>
                 </div>
             </div>
@@ -1091,6 +1103,7 @@ async function checkServices() {
     const res = await fetch('/api/services');
     const svc = await res.json();
     document.getElementById('svc-comfyui').className = 'service-dot ' + (svc.comfyui.online ? 'online' : 'offline');
+    document.getElementById('svc-orpheus').className = 'service-dot ' + (svc.orpheus?.online ? 'online' : 'offline');
     document.getElementById('svc-kokoro').className = 'service-dot ' + (svc.kokoro.online ? 'online' : 'offline');
     document.getElementById('svc-godot').className = 'service-dot ' + (svc.godot.available ? 'online' : 'offline');
 }

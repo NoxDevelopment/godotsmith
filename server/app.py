@@ -387,6 +387,10 @@ async def get_services():
             "port": cfg["comfyui_port"],
             "path": cfg["comfyui_path"],
         },
+        "orpheus": {
+            "online": check_service(5005),
+            "port": 5005,
+        },
         "kokoro": {
             "online": check_service(cfg["kokoro_port"]),
             "port": cfg["kokoro_port"],

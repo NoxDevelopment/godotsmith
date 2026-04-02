@@ -403,7 +403,45 @@ def cmd_tts(args):
     rate_str = f"+{int((args.speed - 1) * 100)}%" if args.speed >= 1 else f"{int((args.speed - 1) * 100)}%"
     volume_str = f"+{int((args.volume - 1) * 100)}%" if args.volume >= 1 else f"{int((args.volume - 1) * 100)}%"
 
-    # Try Kokoro first
+    # Try Orpheus first (best quality, emotional, local)
+    if args.backend in ("auto", "orpheus"):
+        try:
+            r = requests.get("http://localhost:5005/health", timeout=3)
+            if r.status_code == 200:
+                orpheus_text = text
+                # Add emotion tags if specified
+                if emotion:
+                    emotion_map = {
+                        "cheerful": "<laugh>", "sad": "<sigh>", "angry": "",
+                        "excited": "<gasp>", "terrified": "<gasp>", "whispering": "<breath>",
+                        "hopeful": "<breath>", "laughing": "<laugh>",
+                    }
+                    tag = emotion_map.get(emotion, "")
+                    if tag:
+                        orpheus_text = f"{tag} {text}"
+
+                print(f"TTS via Orpheus (voice=tara, emotion={emotion or 'none'})...", file=sys.stderr)
+                r = requests.post("http://localhost:5005/speak", json={
+                    "text": orpheus_text,
+                    "voice": "tara",
+                }, timeout=120)
+                r.raise_for_status()
+                result_data = r.json()
+                output_file = result_data.get("output_file", "")
+                if output_file and Path(output_file).exists():
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    import shutil
+                    shutil.copy2(output_file, str(output))
+                    print(f"Saved: {output}", file=sys.stderr)
+                    result_json(True, path=str(output), cost_cents=0, backend="orpheus")
+                    return
+        except Exception as e:
+            if args.backend == "orpheus":
+                result_json(False, error=f"Orpheus failed: {e}")
+                sys.exit(1)
+            print(f"Orpheus unavailable: {e}", file=sys.stderr)
+
+    # Try Kokoro next
     if args.backend in ("auto", "kokoro"):
         try:
             r = requests.get(f"{KOKORO_URL}/v1/models", timeout=3)
@@ -519,7 +557,7 @@ def main():
     p.add_argument("--volume", type=float, default=1.0, help="Volume (0.5=quiet, 1.5=loud)")
     p.add_argument("--emotion", default="", choices=[""] + list(EDGE_EMOTIONS.keys()),
                    help="Emotion style (EdgeTTS only, not all voices support all styles)")
-    p.add_argument("--backend", choices=["auto", "kokoro", "edge_tts"], default="auto")
+    p.add_argument("--backend", choices=["auto", "orpheus", "kokoro", "edge_tts"], default="auto")
     p.add_argument("-o", "--output", required=True)
     p.set_defaults(func=cmd_tts)
 
