@@ -765,6 +765,11 @@ async function openProject(path) {
         <button class="btn btn-outline btn-sm" onclick="exportProject('web')">🌐 Export Web</button>
     `;
 
+    // Always show Continue Development button
+    document.getElementById('detail-actions').innerHTML = `
+        <button class="btn btn-accent" onclick="continueDevelopment('${esc}')" style="font-size:14px; padding:10px 20px;">🚀 Continue Development</button>
+    ` + document.getElementById('detail-actions').innerHTML;
+
     // Quick stats
     const images = detail.assets?.images || [];
     const audio = detail.assets?.audio || [];
@@ -1191,6 +1196,18 @@ function guardedAction(btn, message, asyncFn) {
         hideLoading();
         btn.disabled = false;
         btn.textContent = origText;
+    });
+}
+
+// --- Continue Development ---
+function continueDevelopment(path) {
+    showLoading('Launching Claude Code with game prompt...');
+    fetch('/api/launch/claude', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path, prompt: true})
+    }).then(() => {
+        hideLoading();
+        toast('Claude Code launched — building your game!', 'success');
     });
 }
 

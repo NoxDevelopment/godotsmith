@@ -1717,21 +1717,50 @@ async def launch_action(action: str, request: Request):
             claude_args = "claude --dangerously-skip-permissions"
 
         if prompt:
-            # Auto-send the game prompt to Claude Code via --print flag and pipe
-            # Write prompt to a temp file and use claude -p to send it
+            # Build a context-aware continuation prompt
             import tempfile
+            prompt_text = ""
+
             prompt_file = Path(path) / "GAME_PROMPT.md"
-            if prompt_file.exists():
+            plan_file = Path(path) / "PLAN.md"
+            project_file = Path(path) / "project.godot"
+
+            if plan_file.exists():
+                # Game already started — find incomplete tasks
+                plan_content = plan_file.read_text(errors="ignore")
+                pending_tasks = []
+                current_task = None
+                for line in plan_content.splitlines():
+                    if line.startswith("## ") and ". " in line:
+                        current_task = line[3:]
+                    elif current_task and "**Status:** pending" in line:
+                        pending_tasks.append(current_task)
+                        current_task = None
+                    elif current_task and "**Status:**" in line:
+                        current_task = None
+
+                if pending_tasks:
+                    prompt_text = f"Continue building this game. Read PLAN.md, STRUCTURE.md, and MEMORY.md for context.\n\nPending tasks:\n"
+                    for t in pending_tasks[:5]:
+                        prompt_text += f"- {t}\n"
+                    prompt_text += "\nPick up where we left off. Run /godotsmith if you need to regenerate the plan."
+                else:
+                    prompt_text = "The game plan tasks are all done. Read PLAN.md and ask the user what to improve or add next."
+            elif prompt_file.exists():
+                # Game prompt exists but no plan yet — start building
                 prompt_text = prompt_file.read_text()
             else:
-                prompt_text = prompt
+                # No context — just open Claude
+                prompt_text = ""
 
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=path) as f:
-                f.write(prompt_text)
-                tmp = f.name
-
-            cmd = ["cmd", "/c", "start", "cmd", "/k",
-                   f"cd /d {path} && type {Path(tmp).name} | {claude_args} && del {Path(tmp).name}"]
+            if prompt_text:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=path) as f:
+                    f.write(prompt_text)
+                    tmp = f.name
+                cmd = ["cmd", "/c", "start", "cmd", "/k",
+                       f"cd /d {path} && type {Path(tmp).name} | {claude_args} && del {Path(tmp).name}"]
+            else:
+                cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && {claude_args}"]
         else:
             cmd = ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && {claude_args}"]
         subprocess.Popen(cmd, shell=False)
