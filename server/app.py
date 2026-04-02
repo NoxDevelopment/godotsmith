@@ -715,6 +715,227 @@ async def generate_music(request: Request):
     return {"ok": False, "error": result.stderr[:500]}
 
 
+# --- API: File Browser & Code Editor ---
+
+@app.get("/api/project/files/{path:path}")
+async def list_project_files(path: str, dir: str = ""):
+    """List files in a project directory."""
+    root = Path(path) / dir if dir else Path(path)
+    if not root.exists():
+        return {"files": [], "error": "Directory not found"}
+
+    items = []
+    try:
+        for entry in sorted(root.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
+            # Skip hidden/build dirs
+            if entry.name.startswith(".") and entry.name not in [".gitignore"]:
+                continue
+            if entry.name in ["__pycache__", "node_modules", ".godot"]:
+                continue
+
+            rel = str(entry.relative_to(Path(path))).replace("\\", "/")
+            item = {
+                "name": entry.name,
+                "path": rel,
+                "is_dir": entry.is_dir(),
+                "size": entry.stat().st_size if entry.is_file() else 0,
+            }
+            if entry.is_file():
+                item["ext"] = entry.suffix.lower()
+            items.append(item)
+    except PermissionError:
+        pass
+    return {"files": items, "current_dir": dir}
+
+
+@app.get("/api/project/file-content/{path:path}")
+async def read_file(path: str, file: str = ""):
+    """Read a text file's content."""
+    fp = Path(path) / file if file else Path(path)
+    if not fp.exists() or not fp.is_file():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    # Only read text files
+    text_exts = {".gd", ".tscn", ".tres", ".cfg", ".md", ".txt", ".json", ".csv",
+                 ".gdshader", ".import", ".godot", ".gitignore", ".py", ".cs", ".cpp",
+                 ".h", ".toml", ".yaml", ".yml", ".ini", ".xml", ".html", ".css", ".js"}
+    if fp.suffix.lower() not in text_exts:
+        return JSONResponse({"error": "Not a text file", "ext": fp.suffix}, status_code=400)
+    try:
+        content = fp.read_text(errors="replace")
+        return {"content": content, "path": str(fp), "name": fp.name, "ext": fp.suffix}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/project/file-save")
+async def save_file(request: Request):
+    """Save text content to a file."""
+    data = await request.json()
+    file_path = data.get("file_path", "")
+    content = data.get("content", "")
+    if not file_path:
+        return JSONResponse({"error": "file_path required"}, status_code=400)
+    fp = Path(file_path)
+    try:
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(content)
+        return {"ok": True, "path": str(fp)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# --- API: GitHub Integration ---
+
+@app.get("/api/github/status")
+async def github_status():
+    """Check if gh CLI is authenticated."""
+    try:
+        result = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=10)
+        authenticated = "Logged in" in result.stdout or "Logged in" in result.stderr
+        user = ""
+        for line in (result.stdout + result.stderr).splitlines():
+            if "account" in line.lower():
+                parts = line.split()
+                for i, p in enumerate(parts):
+                    if p.lower() == "account":
+                        if i + 1 < len(parts):
+                            user = parts[i + 1]
+                            break
+        return {"authenticated": authenticated, "user": user, "output": result.stderr.strip()}
+    except FileNotFoundError:
+        return {"authenticated": False, "error": "gh CLI not installed"}
+    except Exception as e:
+        return {"authenticated": False, "error": str(e)}
+
+
+@app.get("/api/github/repo-status/{path:path}")
+async def github_repo_status(path: str):
+    """Get git/GitHub status for a project."""
+    p = Path(path)
+    if not (p / ".git").exists():
+        return {"is_repo": False}
+
+    info = {"is_repo": True}
+
+    # Current branch
+    try:
+        r = subprocess.run(["git", "branch", "--show-current"], cwd=path, capture_output=True, text=True, timeout=5)
+        info["branch"] = r.stdout.strip()
+    except Exception:
+        info["branch"] = "unknown"
+
+    # Remote URL
+    try:
+        r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=path, capture_output=True, text=True, timeout=5)
+        info["remote"] = r.stdout.strip()
+        info["has_remote"] = bool(info["remote"])
+    except Exception:
+        info["remote"] = ""
+        info["has_remote"] = False
+
+    # Status (changed files)
+    try:
+        r = subprocess.run(["git", "status", "--porcelain"], cwd=path, capture_output=True, text=True, timeout=10)
+        changes = [l.strip() for l in r.stdout.strip().splitlines() if l.strip()]
+        info["changes"] = changes
+        info["has_changes"] = len(changes) > 0
+        info["change_count"] = len(changes)
+    except Exception:
+        info["changes"] = []
+        info["has_changes"] = False
+
+    # Ahead/behind
+    try:
+        r = subprocess.run(["git", "rev-list", "--left-right", "--count", "HEAD...@{u}"],
+                          cwd=path, capture_output=True, text=True, timeout=5)
+        parts = r.stdout.strip().split()
+        if len(parts) == 2:
+            info["ahead"] = int(parts[0])
+            info["behind"] = int(parts[1])
+    except Exception:
+        info["ahead"] = 0
+        info["behind"] = 0
+
+    return info
+
+
+@app.post("/api/github/create-repo")
+async def create_github_repo(request: Request):
+    """Create a GitHub repo for a project."""
+    data = await request.json()
+    path = data.get("path", "")
+    name = data.get("name", "")
+    description = data.get("description", "")
+    private = data.get("private", False)
+
+    if not path or not name:
+        return JSONResponse({"error": "path and name required"}, status_code=400)
+
+    visibility = "--private" if private else "--public"
+    cmd = ["gh", "repo", "create", name, visibility,
+           "--description", description or f"Game project created with Godotsmith",
+           "--source", path, "--push"]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            # Extract repo URL from output
+            url = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+            return {"ok": True, "url": url, "output": result.stdout + result.stderr}
+        return {"ok": False, "error": result.stderr.strip(), "output": result.stdout}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/github/commit")
+async def git_commit(request: Request):
+    """Stage all changes and commit."""
+    data = await request.json()
+    path = data.get("path", "")
+    message = data.get("message", "Update from Godotsmith IDE")
+
+    try:
+        # Stage all
+        subprocess.run(["git", "add", "-A"], cwd=path, capture_output=True, timeout=10)
+        # Also force-add assets
+        subprocess.run(["git", "add", "-f", "assets/"], cwd=path, capture_output=True, timeout=10)
+        # Commit
+        result = subprocess.run(["git", "commit", "-m", message], cwd=path, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return {"ok": True, "output": result.stdout}
+        if "nothing to commit" in result.stdout:
+            return {"ok": True, "output": "Nothing to commit"}
+        return {"ok": False, "error": result.stderr or result.stdout}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/github/push")
+async def git_push(request: Request):
+    """Push to remote."""
+    data = await request.json()
+    path = data.get("path", "")
+    try:
+        result = subprocess.run(["git", "push"], cwd=path, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            return {"ok": True, "output": result.stdout + result.stderr}
+        return {"ok": False, "error": result.stderr}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/github/pull")
+async def git_pull(request: Request):
+    """Pull from remote."""
+    data = await request.json()
+    path = data.get("path", "")
+    try:
+        result = subprocess.run(["git", "pull"], cwd=path, capture_output=True, text=True, timeout=60)
+        return {"ok": result.returncode == 0, "output": result.stdout + result.stderr}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.post("/api/regenerate-asset")
 async def regenerate_asset(request: Request):
     data = await request.json()

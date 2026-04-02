@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Godotsmith IDE</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+    <style>.CodeMirror { height: 100%; background: #0a0a1a; font-size: 13px; }</style>
 </head>
 <body>
 <div class="app">
@@ -32,6 +41,12 @@
             </div>
             <div class="nav-item" onclick="showPage('store')">
                 <span class="icon">&#128230;</span><span>Godot Library</span>
+            </div>
+            <div class="nav-item" onclick="showPage('editor')">
+                <span class="icon">&#128221;</span><span>Code Editor</span>
+            </div>
+            <div class="nav-item" onclick="showPage('github')">
+                <span class="icon">&#128025;</span><span>GitHub</span>
             </div>
             <div class="nav-item" onclick="showPage('console')">
                 <span class="icon">&#9000;</span><span>Console</span>
@@ -437,6 +452,68 @@
         <div id="asset-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:100; overflow-y:auto;" onclick="if(event.target===this)closeAssetModal()">
             <div style="max-width:600px; margin:60px auto; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:24px;">
                 <div id="modal-content"></div>
+            </div>
+        </div>
+
+        <!-- Code Editor Page -->
+        <div class="page" id="page-editor">
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+                <span class="page-header" style="margin:0;">Code Editor</span>
+                <select class="form-input" id="editor-project" style="max-width:250px;" onchange="loadEditorProject()"></select>
+                <span id="editor-file-label" style="color:var(--text-dim); font-family:Consolas; font-size:12px;"></span>
+                <div style="flex:1;"></div>
+                <button class="btn btn-accent btn-sm" onclick="saveEditorFile()">Save (Ctrl+S)</button>
+                <button class="btn btn-outline btn-sm" onclick="newEditorFile()">New File</button>
+            </div>
+            <div style="display:flex; gap:0; height:calc(100vh - 160px); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;">
+                <!-- File Tree -->
+                <div style="width:220px; background:var(--bg-secondary); border-right:1px solid var(--border); overflow-y:auto; padding:8px;" id="editor-file-tree"></div>
+                <!-- Editor -->
+                <div style="flex:1;" id="editor-container">
+                    <textarea id="code-editor"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- GitHub Page -->
+        <div class="page" id="page-github">
+            <div class="page-header">GitHub</div>
+            <div id="github-auth-status" style="margin-bottom:16px;"></div>
+
+            <div class="form-group" style="max-width:400px;">
+                <label>Project</label>
+                <select class="form-input" id="github-project" onchange="loadGithubProject()"></select>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:900px;">
+                <!-- Repo Status -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">Repository</div>
+                    <div id="github-repo-info" style="font-size:13px; color:var(--text-dim);"></div>
+                    <div id="github-create-section" style="margin-top:12px; display:none;">
+                        <div class="form-group"><label>Repo Name</label><input class="form-input" id="gh-repo-name" placeholder="my-game"></div>
+                        <div class="form-group"><label>Description</label><input class="form-input" id="gh-repo-desc" placeholder="Game built with Godotsmith"></div>
+                        <label style="display:flex; align-items:center; gap:6px; margin-bottom:8px; font-size:13px; color:var(--text-dim);">
+                            <input type="checkbox" id="gh-repo-private"> Private repo
+                        </label>
+                        <button class="btn btn-accent btn-sm" onclick="createGithubRepo()">Create & Push</button>
+                    </div>
+                </div>
+
+                <!-- Changes & Actions -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+                    <div style="font-size:16px; font-weight:600; margin-bottom:12px;">Changes</div>
+                    <div id="github-changes" style="font-size:12px; font-family:Consolas; max-height:150px; overflow-y:auto; color:var(--text-dim);"></div>
+                    <div style="margin-top:12px;">
+                        <div class="form-group"><label>Commit Message</label><input class="form-input" id="gh-commit-msg" placeholder="Update game assets and scripts"></div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-accent btn-sm" onclick="gitCommitAndPush()">Commit & Push</button>
+                            <button class="btn btn-outline btn-sm" onclick="gitCommit()">Commit Only</button>
+                            <button class="btn btn-outline btn-sm" onclick="gitPull()">Pull</button>
+                        </div>
+                    </div>
+                    <div id="github-action-result" style="margin-top:8px; font-size:12px;"></div>
+                </div>
             </div>
         </div>
 
@@ -934,6 +1011,241 @@ async function checkServices() {
     document.getElementById('svc-godot').className = 'service-dot ' + (svc.godot.available ? 'online' : 'offline');
 }
 
+// --- Code Editor ---
+let editor = null;
+let editorCurrentFile = '';
+let editorProjectPath = '';
+
+function initEditor() {
+    editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+        theme: 'dracula',
+        lineNumbers: true,
+        indentUnit: 4,
+        tabSize: 4,
+        indentWithTabs: true,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        extraKeys: {'Ctrl-S': saveEditorFile},
+    });
+}
+
+async function loadEditorProjects() {
+    const projects = await (await fetch('/api/projects')).json();
+    const sel = document.getElementById('editor-project');
+    sel.innerHTML = projects.map(p => `<option value="${p.path.replace(/\\/g, '\\\\')}">${p.name}</option>`).join('');
+    if (projects.length) { editorProjectPath = projects[0].path; loadEditorProject(); }
+}
+
+async function loadEditorProject() {
+    editorProjectPath = document.getElementById('editor-project').value;
+    const res = await fetch(`/api/project/files/${encodeURIComponent(editorProjectPath)}`);
+    const data = await res.json();
+    renderFileTree(data.files, '');
+}
+
+function renderFileTree(files, currentDir) {
+    const tree = document.getElementById('editor-file-tree');
+    tree.innerHTML = files.map(f => {
+        const fullPath = f.path;
+        if (f.is_dir) {
+            return `<div style="padding:3px 6px; cursor:pointer; color:var(--blue); font-size:12px;" onclick="expandDir('${fullPath}', this)">
+                📁 ${f.name} <span style="color:var(--text-muted);">›</span>
+                <div class="subdir" style="display:none; margin-left:12px;"></div>
+            </div>`;
+        }
+        const icon = {'.gd':'📜','.tscn':'🎬','.md':'📄','.json':'📋','.py':'🐍','.cs':'#️⃣','.wav':'🔊','.png':'🖼️'}[f.ext] || '📄';
+        return `<div style="padding:3px 6px; cursor:pointer; font-size:12px; color:var(--text); white-space:nowrap; overflow:hidden;"
+                     onclick="openEditorFile('${fullPath}')"
+                     onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=''">
+            ${icon} ${f.name} <span style="color:var(--text-muted); font-size:10px;">${f.size > 0 ? (f.size/1024).toFixed(0)+'K' : ''}</span>
+        </div>`;
+    }).join('');
+}
+
+async function expandDir(dir, el) {
+    const subdir = el.querySelector('.subdir');
+    if (subdir.style.display === 'none') {
+        const res = await fetch(`/api/project/files/${encodeURIComponent(editorProjectPath)}?dir=${encodeURIComponent(dir)}`);
+        const data = await res.json();
+        subdir.innerHTML = data.files.map(f => {
+            const fp = f.path;
+            if (f.is_dir) {
+                return `<div style="padding:2px 4px; cursor:pointer; color:var(--blue); font-size:11px;" onclick="event.stopPropagation(); expandDir('${fp}', this)">
+                    📁 ${f.name} <span style="color:var(--text-muted);">›</span>
+                    <div class="subdir" style="display:none; margin-left:12px;"></div>
+                </div>`;
+            }
+            const icon = {'.gd':'📜','.tscn':'🎬','.md':'📄','.json':'📋','.py':'🐍'}[f.ext] || '📄';
+            return `<div style="padding:2px 4px; cursor:pointer; font-size:11px;" onclick="event.stopPropagation(); openEditorFile('${fp}')"
+                         onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=''">
+                ${icon} ${f.name}
+            </div>`;
+        }).join('');
+        subdir.style.display = 'block';
+    } else {
+        subdir.style.display = 'none';
+    }
+}
+
+async function openEditorFile(relPath) {
+    const res = await fetch(`/api/project/file-content/${encodeURIComponent(editorProjectPath)}?file=${encodeURIComponent(relPath)}`);
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+
+    editorCurrentFile = editorProjectPath.replace(/\\\\/g, '/') + '/' + relPath;
+    document.getElementById('editor-file-label').textContent = relPath;
+
+    // Set language mode
+    const modeMap = {'.gd':'python','.py':'python','.cs':'text/x-csharp','.json':'javascript','.md':'markdown','.xml':'xml','.html':'text/html','.js':'javascript','.css':'css'};
+    const mode = modeMap[data.ext] || 'text';
+    editor.setOption('mode', mode);
+    editor.setValue(data.content);
+    editor.clearHistory();
+}
+
+async function saveEditorFile() {
+    if (!editorCurrentFile || !editor) return;
+    const content = editor.getValue();
+    const res = await fetch('/api/project/file-save', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_path: editorCurrentFile, content})
+    });
+    const data = await res.json();
+    if (data.ok) {
+        document.getElementById('editor-file-label').textContent += ' ✓ saved';
+        setTimeout(() => {
+            document.getElementById('editor-file-label').textContent = editorCurrentFile.split('/').pop();
+        }, 2000);
+    }
+}
+
+function newEditorFile() {
+    const name = prompt('File name (e.g., scripts/my_script.gd):');
+    if (!name) return;
+    editorCurrentFile = editorProjectPath.replace(/\\\\/g, '/') + '/' + name;
+    document.getElementById('editor-file-label').textContent = name;
+    editor.setValue('');
+    editor.setOption('mode', name.endsWith('.gd') ? 'python' : 'text');
+}
+
+// --- GitHub ---
+async function loadGithubProjects() {
+    const projects = await (await fetch('/api/projects')).json();
+    document.getElementById('github-project').innerHTML = projects.map(p =>
+        `<option value="${p.path.replace(/\\/g, '\\\\')}">${p.name}</option>`
+    ).join('');
+    checkGithubAuth();
+    if (projects.length) loadGithubProject();
+}
+
+async function checkGithubAuth() {
+    const res = await fetch('/api/github/status');
+    const data = await res.json();
+    document.getElementById('github-auth-status').innerHTML = data.authenticated
+        ? `<span style="color:var(--accent);">✓ Logged in as ${data.user}</span>`
+        : `<span style="color:var(--red);">✗ Not authenticated. Run: gh auth login</span>`;
+}
+
+async function loadGithubProject() {
+    const path = document.getElementById('github-project').value;
+    if (!path) return;
+    const res = await fetch('/api/github/repo-status/' + encodeURIComponent(path));
+    const info = await res.json();
+    const repoDiv = document.getElementById('github-repo-info');
+    const createDiv = document.getElementById('github-create-section');
+
+    if (!info.is_repo) {
+        repoDiv.innerHTML = 'Not a git repository.';
+        createDiv.style.display = 'block';
+        document.getElementById('gh-repo-name').value = path.split(/[/\\]/).pop();
+        return;
+    }
+
+    let html = `<div>Branch: <strong>${info.branch}</strong></div>`;
+    if (info.has_remote) {
+        html += `<div>Remote: <a href="${info.remote.replace('.git','')}" target="_blank" style="color:var(--blue);">${info.remote}</a></div>`;
+        if (info.ahead > 0) html += `<div style="color:var(--yellow);">↑ ${info.ahead} commits ahead</div>`;
+        if (info.behind > 0) html += `<div style="color:var(--yellow);">↓ ${info.behind} commits behind</div>`;
+        createDiv.style.display = 'none';
+    } else {
+        html += '<div style="color:var(--text-muted);">No remote — create a GitHub repo:</div>';
+        createDiv.style.display = 'block';
+        document.getElementById('gh-repo-name').value = path.split(/[/\\]/).pop();
+    }
+    repoDiv.innerHTML = html;
+
+    // Changes
+    const changesDiv = document.getElementById('github-changes');
+    if (info.has_changes) {
+        changesDiv.innerHTML = info.changes.map(c => {
+            const color = c.startsWith('M') ? 'var(--yellow)' : c.startsWith('A') || c.startsWith('?') ? 'var(--accent)' : c.startsWith('D') ? 'var(--red)' : 'var(--text-dim)';
+            return `<div style="color:${color};">${c}</div>`;
+        }).join('');
+    } else {
+        changesDiv.innerHTML = '<div style="color:var(--accent);">✓ Working tree clean</div>';
+    }
+}
+
+async function createGithubRepo() {
+    const path = document.getElementById('github-project').value;
+    const name = document.getElementById('gh-repo-name').value;
+    const desc = document.getElementById('gh-repo-desc').value;
+    const priv = document.getElementById('gh-repo-private').checked;
+    if (!name) { alert('Enter repo name'); return; }
+
+    document.getElementById('github-action-result').innerHTML = 'Creating repo...';
+    const res = await fetch('/api/github/create-repo', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path, name, description: desc, private: priv})
+    });
+    const data = await res.json();
+    document.getElementById('github-action-result').innerHTML = data.ok
+        ? `<span style="color:var(--accent);">✓ Created: <a href="${data.url}" target="_blank" style="color:var(--blue);">${data.url}</a></span>`
+        : `<span style="color:var(--red);">${data.error}</span>`;
+    if (data.ok) loadGithubProject();
+}
+
+async function gitCommit() {
+    const path = document.getElementById('github-project').value;
+    const msg = document.getElementById('gh-commit-msg').value || 'Update from Godotsmith IDE';
+    document.getElementById('github-action-result').innerHTML = 'Committing...';
+    const res = await fetch('/api/github/commit', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path, message: msg})
+    });
+    const data = await res.json();
+    document.getElementById('github-action-result').innerHTML = data.ok
+        ? `<span style="color:var(--accent);">✓ Committed</span>` : `<span style="color:var(--red);">${data.error}</span>`;
+    loadGithubProject();
+}
+
+async function gitCommitAndPush() {
+    await gitCommit();
+    const path = document.getElementById('github-project').value;
+    document.getElementById('github-action-result').innerHTML += ' Pushing...';
+    const res = await fetch('/api/github/push', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path})
+    });
+    const data = await res.json();
+    document.getElementById('github-action-result').innerHTML = data.ok
+        ? `<span style="color:var(--accent);">✓ Committed & Pushed</span>` : `<span style="color:var(--red);">${data.error}</span>`;
+    loadGithubProject();
+}
+
+async function gitPull() {
+    const path = document.getElementById('github-project').value;
+    document.getElementById('github-action-result').innerHTML = 'Pulling...';
+    const res = await fetch('/api/github/pull', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path})
+    });
+    const data = await res.json();
+    document.getElementById('github-action-result').innerHTML = data.ok
+        ? `<span style="color:var(--accent);">✓ Pulled</span>` : `<span style="color:var(--red);">${data.error}</span>`;
+    loadGithubProject();
+}
+
 // --- Sprite Studio ---
 async function loadSpriteProjects() {
     const projects = await (await fetch('/api/projects')).json();
@@ -1290,6 +1602,9 @@ loadProjects();
 loadCatalog();
 loadSpriteProjects();
 loadAudioProjects();
+loadEditorProjects();
+loadGithubProjects();
+initEditor();
 checkServices();
 setInterval(checkServices, 15000);
 </script>
