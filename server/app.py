@@ -10,6 +10,7 @@ Access: http://localhost:7777 (or any device on LAN)
 
 import asyncio
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -239,6 +240,11 @@ async def get_project_detail(path: str):
         if doc_path.exists():
             detail[doc_name.replace(".", "_").lower()] = doc_path.read_text(errors="ignore")
 
+    # Style profile
+    style_path = p / STYLE_PROFILE_FILENAME
+    if style_path.exists():
+        detail["style_profile"] = json.loads(style_path.read_text(encoding="utf-8"))
+
     # Parse PLAN.md for task statuses
     plan_path = p / "PLAN.md"
     if plan_path.exists():
@@ -330,12 +336,22 @@ async def create_project(request: Request):
     projects.insert(0, {
         "name": name, "path": str(target), "engine": engine,
         "genre": genre, "concept": data.get("concept", ""),
+        "style": data.get("style", ""),
         "created": datetime.now().isoformat(),
         "last_opened": datetime.now().isoformat(),
     })
     save_projects(projects)
 
-    return {"ok": True, "path": str(target), "prompt": prompt}
+    # Initialize style profile if style was provided
+    style_text = data.get("style", "").strip()
+    if style_text:
+        profile = dict(DEFAULT_STYLE_PROFILE)
+        profile["art_direction"] = style_text
+        profile = _compile_style_profile(profile)
+        save_style_profile(str(target), profile)
+
+    return {"ok": True, "path": str(target), "prompt": prompt,
+            "style_profile_initialized": bool(style_text)}
 
 
 def publish_project(target: Path, engine: str, cfg: dict):
@@ -556,6 +572,1870 @@ async def update_plan_task(request: Request):
     if updated:
         plan_path.write_text("\n".join(lines))
     return {"ok": updated}
+
+
+# =============================================================================
+# Project Creative Identity — unified style profile for ALL content generation
+#
+# This is the creative bible for the project. Every generation endpoint — visual,
+# audio, text, animation — reads from this profile to maintain consistency.
+# =============================================================================
+
+STYLE_PROFILE_FILENAME = "STYLE_PROFILE.json"
+
+# The interview is organized into sections so the UI can present them as tabs/steps
+STYLE_INTERVIEW_QUESTIONS = [
+    # ---- Section 1: Visual Art ----
+    {
+        "id": "art_direction",
+        "section": "visual",
+        "question": "Describe the overall art style (e.g., '16-bit SNES RPG with warm colors', 'dark horror pixel art', 'clean minimalist vector').",
+        "required": True,
+        "field": "art_direction",
+    },
+    {
+        "id": "era_console",
+        "section": "visual",
+        "question": "Which retro console/era should this evoke?",
+        "required": False,
+        "field": "era_console",
+        "options": ["gameboy", "nes", "snes", "gba", "genesis", "c64", "modern_hd", "none"],
+    },
+    {
+        "id": "palette",
+        "section": "visual",
+        "question": "Preferred color palette?",
+        "required": False,
+        "field": "palette",
+        "options": list(PIXEL_PALETTES.keys()) if PIXEL_TOOLKIT_AVAILABLE else [],
+    },
+    {
+        "id": "resolution",
+        "section": "visual",
+        "question": "Target sprite resolution in pixels?",
+        "required": False,
+        "field": "resolution",
+        "options": PIXEL_RESOLUTIONS,
+    },
+    {
+        "id": "perspective",
+        "section": "visual",
+        "question": "Primary camera perspective?",
+        "required": False,
+        "field": "perspective",
+        "options": ["side-scroll", "top-down", "isometric", "first-person", "mixed"],
+    },
+    {
+        "id": "color_mood",
+        "section": "visual",
+        "question": "Color mood / atmosphere?",
+        "required": False,
+        "field": "color_mood",
+        "options": ["warm", "cool", "dark", "vibrant", "pastel", "neon", "muted", "monochrome"],
+    },
+    {
+        "id": "outline_style",
+        "section": "visual",
+        "question": "Outline style for sprites?",
+        "required": False,
+        "field": "outline_style",
+        "options": ["none", "thin-black", "thick-black", "colored", "sel-out", "anti-aliased"],
+    },
+    {
+        "id": "shading_style",
+        "section": "visual",
+        "question": "Shading approach?",
+        "required": False,
+        "field": "shading_style",
+        "options": ["flat", "cel-shaded", "dithered", "soft-gradient", "pillow-shaded", "hue-shifted"],
+    },
+    {
+        "id": "reference_images",
+        "section": "visual",
+        "question": "Reference images — file paths or URLs that capture the visual style you want.",
+        "required": False,
+        "field": "reference_images",
+    },
+    {
+        "id": "visual_notes",
+        "section": "visual",
+        "question": "Any other visual notes? (e.g., 'dithering preferred', 'sub-pixel animation', 'no anti-aliasing')",
+        "required": False,
+        "field": "visual_notes",
+    },
+
+    # ---- Section 2: Tone & Maturity ----
+    {
+        "id": "tone",
+        "section": "tone",
+        "question": "Overall tone of the game?",
+        "required": True,
+        "field": "tone",
+        "options": [
+            "lighthearted", "comedic", "satirical", "whimsical",
+            "serious", "dramatic", "melancholic", "bittersweet",
+            "dark", "gritty", "horror", "psychological",
+            "epic", "heroic", "adventurous", "mysterious",
+            "cozy", "wholesome", "nostalgic", "dreamlike",
+        ],
+    },
+    {
+        "id": "maturity",
+        "section": "tone",
+        "question": "Content maturity rating?",
+        "required": True,
+        "field": "maturity",
+        "options": ["E-everyone", "E10-everyone10+", "T-teen", "M-mature"],
+        "descriptions": {
+            "E-everyone": "No violence, no scary content, no suggestive themes. Suitable for all ages.",
+            "E10-everyone10+": "Mild fantasy violence, mild humor, minimal scary moments. Ages 10+.",
+            "T-teen": "Moderate violence, blood, mild language, suggestive themes, some horror elements. Ages 13+.",
+            "M-mature": "Intense violence, gore, strong language, mature themes, horror. Ages 17+.",
+        },
+    },
+    {
+        "id": "humor_level",
+        "section": "tone",
+        "question": "How much humor?",
+        "required": False,
+        "field": "humor_level",
+        "options": ["none", "subtle", "moderate", "heavy", "parody"],
+    },
+    {
+        "id": "humor_style",
+        "section": "tone",
+        "question": "If humor is present, what kind?",
+        "required": False,
+        "field": "humor_style",
+        "options": ["wordplay", "slapstick", "dry-wit", "absurdist", "self-aware", "dark-humor", "puns", "pop-culture"],
+    },
+    {
+        "id": "emotional_range",
+        "section": "tone",
+        "question": "What emotional range should the game cover?",
+        "required": False,
+        "field": "emotional_range",
+        "options": ["narrow-upbeat", "narrow-dark", "moderate", "wide-full-spectrum"],
+    },
+    {
+        "id": "themes",
+        "section": "tone",
+        "question": "Core themes the game explores? (comma-separated, e.g., 'friendship, loss, redemption, identity')",
+        "required": False,
+        "field": "themes",
+    },
+    {
+        "id": "content_boundaries",
+        "section": "tone",
+        "question": "Hard content boundaries — things to NEVER include? (e.g., 'no real-world politics', 'no animal harm', 'no jump scares')",
+        "required": False,
+        "field": "content_boundaries",
+    },
+
+    # ---- Section 3: Writing & Dialogue ----
+    {
+        "id": "writing_style",
+        "section": "writing",
+        "question": "Writing style / voice?",
+        "required": False,
+        "field": "writing_style",
+        "options": [
+            "terse-minimal", "poetic-flowery", "punchy-action", "literary",
+            "conversational-casual", "formal-archaic", "noir-hardboiled",
+            "fairy-tale", "journalistic-dry", "stream-of-consciousness",
+        ],
+    },
+    {
+        "id": "vocabulary_level",
+        "section": "writing",
+        "question": "Vocabulary complexity?",
+        "required": False,
+        "field": "vocabulary_level",
+        "options": ["simple-child", "accessible", "moderate", "advanced-literary"],
+    },
+    {
+        "id": "dialogue_style",
+        "section": "writing",
+        "question": "How should characters speak?",
+        "required": False,
+        "field": "dialogue_style",
+        "options": [
+            "naturalistic", "stylized-dramatic", "quippy-snappy", "formal",
+            "dialect-heavy", "minimalist-silent-protag", "fully-voiced-expressive",
+        ],
+    },
+    {
+        "id": "narrator_presence",
+        "section": "writing",
+        "question": "Is there a narrator? What kind?",
+        "required": False,
+        "field": "narrator_presence",
+        "options": ["none", "omniscient-third", "unreliable", "first-person-character",
+                    "second-person-you", "dry-observer", "dramatic-storyteller"],
+    },
+    {
+        "id": "text_density",
+        "section": "writing",
+        "question": "How text-heavy is the game?",
+        "required": False,
+        "field": "text_density",
+        "options": ["minimal-show-dont-tell", "moderate-balanced", "heavy-story-driven", "visual-novel-level"],
+    },
+    {
+        "id": "naming_convention",
+        "section": "writing",
+        "question": "Naming style for characters, places, items? (e.g., 'Japanese RPG names', 'Anglo-fantasy', 'sci-fi codenames', 'pun-based', 'descriptive')",
+        "required": False,
+        "field": "naming_convention",
+    },
+    {
+        "id": "ui_text_style",
+        "section": "writing",
+        "question": "UI/menu text tone? (e.g., 'functional-clean', 'in-character-diegetic', 'humorous', 'retro-arcade')",
+        "required": False,
+        "field": "ui_text_style",
+        "options": ["functional-clean", "in-character-diegetic", "humorous", "retro-arcade", "minimalist-icons"],
+    },
+    {
+        "id": "writing_references",
+        "section": "writing",
+        "question": "Games/shows/books whose writing style you want to channel? (e.g., 'Undertale', 'Disco Elysium', 'Zelda', 'Adventure Time')",
+        "required": False,
+        "field": "writing_references",
+    },
+
+    # ---- Section 4: Audio & Music ----
+    {
+        "id": "music_style",
+        "section": "audio",
+        "question": "Music style?",
+        "required": False,
+        "field": "music_style",
+        "options": [
+            "chiptune-8bit", "chiptune-16bit", "orchestral", "synth-wave",
+            "lo-fi-chill", "ambient-atmospheric", "rock-metal", "jazz",
+            "folk-acoustic", "electronic-edm", "classical", "silence-minimal",
+        ],
+    },
+    {
+        "id": "music_mood_default",
+        "section": "audio",
+        "question": "Default musical mood?",
+        "required": False,
+        "field": "music_mood_default",
+        "options": ["epic", "sad", "tense", "happy", "dark", "neutral", "mysterious", "peaceful"],
+    },
+    {
+        "id": "sfx_style",
+        "section": "audio",
+        "question": "Sound effects style?",
+        "required": False,
+        "field": "sfx_style",
+        "options": ["retro-beeps", "crisp-modern", "crunchy-lofi", "realistic", "exaggerated-cartoon", "minimal"],
+    },
+    {
+        "id": "voice_style",
+        "section": "audio",
+        "question": "Character voice approach?",
+        "required": False,
+        "field": "voice_style",
+        "options": [
+            "no-voice", "grunts-only", "gibberish-simlish", "partial-voiced",
+            "fully-voiced", "text-to-speech-retro",
+        ],
+    },
+    {
+        "id": "voice_default_emotion",
+        "section": "audio",
+        "question": "Default voice emotion/delivery for TTS?",
+        "required": False,
+        "field": "voice_default_emotion",
+        "options": ["cheerful", "friendly", "narrator", "excited", "sad", "terrified", "whispering", "neutral"],
+    },
+    {
+        "id": "audio_notes",
+        "section": "audio",
+        "question": "Any other audio notes? (e.g., 'no voice acting', 'leitmotifs per character', 'dynamic music layers')",
+        "required": False,
+        "field": "audio_notes",
+    },
+
+    # ---- Section 5: World & Character Design ----
+    {
+        "id": "world_setting",
+        "section": "world",
+        "question": "World setting? (e.g., 'medieval fantasy', 'post-apocalyptic', 'modern day', 'alien planet', 'dreamscape')",
+        "required": False,
+        "field": "world_setting",
+    },
+    {
+        "id": "world_tone",
+        "section": "world",
+        "question": "How does the world feel?",
+        "required": False,
+        "field": "world_tone",
+        "options": ["lived-in-realistic", "stylized-exaggerated", "sparse-lonely",
+                    "dense-bustling", "decaying-ruined", "magical-wonder", "oppressive-claustrophobic"],
+    },
+    {
+        "id": "character_proportions",
+        "section": "world",
+        "question": "Character body proportions?",
+        "required": False,
+        "field": "character_proportions",
+        "options": ["realistic", "chibi-2head", "chibi-3head", "stylized-4head",
+                    "heroic-8head", "lanky-exaggerated", "squat-stout"],
+    },
+    {
+        "id": "character_design_philosophy",
+        "section": "world",
+        "question": "Character design approach?",
+        "required": False,
+        "field": "character_design_philosophy",
+        "options": ["silhouette-first", "color-coded", "uniform-with-variations",
+                    "wildly-diverse", "minimalist", "detailed-ornate"],
+    },
+    {
+        "id": "enemy_design",
+        "section": "world",
+        "question": "Enemy/monster visual approach?",
+        "required": False,
+        "field": "enemy_design",
+        "options": ["cute-approachable", "menacing-scary", "abstract-geometric",
+                    "corrupted-organic", "mechanical", "palette-swap-variants"],
+    },
+    {
+        "id": "cultural_influences",
+        "section": "world",
+        "question": "Cultural or regional influences? (e.g., 'Japanese', 'Norse', 'Mesoamerican', 'steampunk Victorian', 'none specific')",
+        "required": False,
+        "field": "cultural_influences",
+    },
+
+    # ---- Section 6: UI / UX Feel ----
+    {
+        "id": "ui_style",
+        "section": "ui",
+        "question": "UI visual style?",
+        "required": False,
+        "field": "ui_style",
+        "options": ["retro-bordered", "clean-modern", "ornate-fantasy", "diegetic-in-world",
+                    "minimal-hud", "skeuomorphic", "flat-material"],
+    },
+    {
+        "id": "font_style",
+        "section": "ui",
+        "question": "Font / text rendering style?",
+        "required": False,
+        "field": "font_style",
+        "options": ["pixel-bitmap", "clean-sans", "handwritten", "serif-formal",
+                    "monospace-terminal", "custom-thematic"],
+    },
+    {
+        "id": "transition_style",
+        "section": "ui",
+        "question": "Scene transition style?",
+        "required": False,
+        "field": "transition_style",
+        "options": ["hard-cut", "fade-to-black", "wipe", "pixel-dissolve",
+                    "iris-circle", "slide", "custom-thematic"],
+    },
+    {
+        "id": "screen_shake",
+        "section": "ui",
+        "question": "Juice / screen effects level?",
+        "required": False,
+        "field": "screen_shake",
+        "options": ["none-clean", "subtle", "moderate", "heavy-juicy", "over-the-top"],
+    },
+]
+
+DEFAULT_STYLE_PROFILE = {
+    # -- Visual --
+    "art_direction": "",
+    "era_console": "",
+    "palette": "",
+    "resolution": 64,
+    "perspective": "",
+    "color_mood": "",
+    "outline_style": "",
+    "shading_style": "",
+    "reference_images": [],
+    "visual_notes": "",
+
+    # -- Tone & Maturity --
+    "tone": "",
+    "maturity": "",
+    "humor_level": "none",
+    "humor_style": "",
+    "emotional_range": "",
+    "themes": "",
+    "content_boundaries": "",
+
+    # -- Writing & Dialogue --
+    "writing_style": "",
+    "vocabulary_level": "",
+    "dialogue_style": "",
+    "narrator_presence": "none",
+    "text_density": "",
+    "naming_convention": "",
+    "ui_text_style": "",
+    "writing_references": "",
+
+    # -- Audio --
+    "music_style": "",
+    "music_mood_default": "",
+    "sfx_style": "",
+    "voice_style": "no-voice",
+    "voice_default_emotion": "neutral",
+    "audio_notes": "",
+
+    # -- World & Characters --
+    "world_setting": "",
+    "world_tone": "",
+    "character_proportions": "",
+    "character_design_philosophy": "",
+    "enemy_design": "",
+    "cultural_influences": "",
+
+    # -- UI/UX --
+    "ui_style": "",
+    "font_style": "",
+    "transition_style": "",
+    "screen_shake": "",
+
+    # -- Derived/computed (filled by _compile_style_profile) --
+    "prompt_prefix": "",
+    "negative_extra": "",
+    "suggested_lora": "sprite_64",
+    "suggested_checkpoint": "",
+    "suggested_style_preset": "",
+    "writing_guide": "",
+    "audio_guide": "",
+    "character_guide": "",
+}
+
+
+def _get_style_profile_path(project_path: str) -> Path:
+    return Path(project_path) / STYLE_PROFILE_FILENAME
+
+
+def load_style_profile(project_path: str) -> dict:
+    """Load the project's style profile, or return defaults."""
+    p = _get_style_profile_path(project_path)
+    if p.exists():
+        return {**DEFAULT_STYLE_PROFILE, **json.loads(p.read_text(encoding="utf-8"))}
+    return dict(DEFAULT_STYLE_PROFILE)
+
+
+def save_style_profile(project_path: str, profile: dict):
+    """Save the project's style profile."""
+    p = _get_style_profile_path(project_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _compile_style_profile(profile: dict) -> dict:
+    """From user answers, derive prompt_prefix, writing_guide, audio_guide, etc.
+
+    This is the central compilation step that turns human-readable style choices
+    into machine-usable directives for every generation pipeline.
+    """
+
+    # ===== VISUAL PROMPT COMPILATION =====
+    vis_parts = []
+    neg_parts = []
+
+    if profile.get("art_direction"):
+        vis_parts.append(profile["art_direction"] + ",")
+
+    # Era/console → visual prompt tags + defaults
+    era = profile.get("era_console", "")
+    era_map = {
+        "gameboy": ("Game Boy style, 4 shades of green, DMG palette,", "colorful, modern", "sprite_32", "gameboy"),
+        "nes": ("NES 8-bit style, limited palette, Famicom,", "modern, HD, 16-bit", "sprite_32", "nes"),
+        "snes": ("SNES 16-bit style, rich colors, Super Nintendo,", "8-bit, modern, 3D", "sprite_64", "endesga32"),
+        "gba": ("GBA style, vibrant handheld graphics,", "modern, HD, 3D", "sprite_64", "endesga32"),
+        "genesis": ("Sega Genesis style, blast processing, 16-bit,", "8-bit, modern, 3D", "sprite_64", "endesga32"),
+        "c64": ("Commodore 64 style, multicolor bitmap,", "modern, HD, many colors", "sprite_32", "c64"),
+        "modern_hd": ("high detail pixel art, modern HD pixel art,", "low resolution, 8-bit", "sprite_64", "endesga64"),
+    }
+    if era in era_map:
+        tag, neg, lora, pal = era_map[era]
+        vis_parts.append(tag)
+        neg_parts.append(neg)
+        if not profile.get("suggested_lora"):
+            profile["suggested_lora"] = lora
+        if not profile.get("palette"):
+            profile["palette"] = pal
+
+    # Perspective
+    persp = profile.get("perspective", "")
+    persp_map = {
+        "side-scroll": "side view, side-scrolling,",
+        "top-down": "top-down view, overhead, birds eye,",
+        "isometric": "isometric view, 3/4 perspective, dimetric,",
+        "first-person": "first person view,",
+    }
+    if persp in persp_map:
+        vis_parts.append(persp_map[persp])
+
+    # Color mood
+    mood = profile.get("color_mood", "")
+    mood_map = {
+        "warm": "warm colors, golden tones,",
+        "cool": "cool colors, blue tones,",
+        "dark": "dark atmosphere, low-key lighting, shadows,",
+        "vibrant": "vibrant saturated colors, bold,",
+        "pastel": "pastel colors, soft tones,",
+        "neon": "neon glow, cyberpunk colors, electric,",
+        "muted": "muted desaturated colors, earthy tones,",
+        "monochrome": "monochrome, single color palette,",
+    }
+    if mood in mood_map:
+        vis_parts.append(mood_map[mood])
+
+    # Outline style
+    outline = profile.get("outline_style", "")
+    outline_map = {
+        "thin-black": "thin black outlines,",
+        "thick-black": "thick black outlines, bold linework,",
+        "colored": "colored outlines, selective outlining,",
+        "sel-out": "sel-out pixel art, darker edge pixels,",
+        "none": "no outlines, clean pixel clusters,",
+    }
+    if outline in outline_map:
+        vis_parts.append(outline_map[outline])
+
+    # Shading
+    shading = profile.get("shading_style", "")
+    shading_map = {
+        "flat": "flat shading, no gradients,",
+        "cel-shaded": "cel-shaded, hard shadow edges,",
+        "dithered": "dithered shading, ordered dither pattern,",
+        "soft-gradient": "soft gradient shading,",
+        "pillow-shaded": "pillow shading,",
+        "hue-shifted": "hue-shifted shadows, colored shadows,",
+    }
+    if shading in shading_map:
+        vis_parts.append(shading_map[shading])
+
+    # Visual notes
+    if profile.get("visual_notes"):
+        vis_parts.append(profile["visual_notes"] + ",")
+
+    profile["prompt_prefix"] = " ".join(vis_parts)
+    profile["negative_extra"] = ", ".join(neg_parts)
+
+    # Match to closest built-in style preset
+    if profile.get("art_direction"):
+        ad_lower = profile["art_direction"].lower()
+        best_match = ""
+        for key, preset in PIXEL_STYLE_PRESETS.items():
+            if key in ad_lower or preset.get("name", "").lower() in ad_lower:
+                best_match = key
+                break
+        profile["suggested_style_preset"] = best_match
+
+    # ===== WRITING GUIDE COMPILATION =====
+    writing_parts = []
+    tone = profile.get("tone", "")
+    maturity = profile.get("maturity", "")
+    writing_style = profile.get("writing_style", "")
+    vocab = profile.get("vocabulary_level", "")
+    dialogue = profile.get("dialogue_style", "")
+    narrator = profile.get("narrator_presence", "")
+    humor = profile.get("humor_level", "")
+    humor_style = profile.get("humor_style", "")
+    themes = profile.get("themes", "")
+    boundaries = profile.get("content_boundaries", "")
+    naming = profile.get("naming_convention", "")
+    ui_text = profile.get("ui_text_style", "")
+    text_density = profile.get("text_density", "")
+    writing_refs = profile.get("writing_references", "")
+
+    if tone:
+        writing_parts.append(f"TONE: {tone}.")
+    if maturity:
+        maturity_desc = {
+            "E-everyone": "Keep all content suitable for children. No violence, scary content, or suggestive themes.",
+            "E10-everyone10+": "Mild fantasy violence OK. Avoid anything scary, gory, or suggestive.",
+            "T-teen": "Moderate violence and mild language OK. Can include some darker themes, mild horror, mild suggestive humor.",
+            "M-mature": "Intense violence, strong language, and mature themes are acceptable. Horror, gore, and complex dark themes allowed.",
+        }
+        writing_parts.append(f"MATURITY: {maturity}. {maturity_desc.get(maturity, '')}")
+    if writing_style:
+        writing_parts.append(f"WRITING VOICE: {writing_style.replace('-', ' ')}.")
+    if vocab:
+        writing_parts.append(f"VOCABULARY: {vocab.replace('-', ' ')} level.")
+    if dialogue:
+        writing_parts.append(f"DIALOGUE STYLE: {dialogue.replace('-', ' ')}.")
+    if narrator and narrator != "none":
+        writing_parts.append(f"NARRATOR: {narrator.replace('-', ' ')}.")
+    if text_density:
+        writing_parts.append(f"TEXT DENSITY: {text_density.replace('-', ' ')}.")
+    if humor and humor != "none":
+        humor_desc = f"HUMOR: {humor} amount"
+        if humor_style:
+            humor_desc += f", {humor_style.replace('-', ' ')} style"
+        writing_parts.append(humor_desc + ".")
+    if themes:
+        writing_parts.append(f"THEMES: {themes}.")
+    if boundaries:
+        writing_parts.append(f"NEVER INCLUDE: {boundaries}.")
+    if naming:
+        writing_parts.append(f"NAMING STYLE: {naming}.")
+    if ui_text:
+        writing_parts.append(f"UI TEXT: {ui_text.replace('-', ' ')}.")
+    if writing_refs:
+        writing_parts.append(f"REFERENCE WORKS: Channel the tone/style of {writing_refs}.")
+
+    profile["writing_guide"] = " ".join(writing_parts)
+
+    # ===== AUDIO GUIDE COMPILATION =====
+    audio_parts = []
+    music = profile.get("music_style", "")
+    music_mood = profile.get("music_mood_default", "")
+    sfx = profile.get("sfx_style", "")
+    voice = profile.get("voice_style", "")
+    voice_emotion = profile.get("voice_default_emotion", "")
+    audio_notes = profile.get("audio_notes", "")
+
+    if music:
+        audio_parts.append(f"MUSIC: {music.replace('-', ' ')}.")
+    if music_mood:
+        audio_parts.append(f"DEFAULT MOOD: {music_mood}.")
+    if sfx:
+        audio_parts.append(f"SFX: {sfx.replace('-', ' ')}.")
+    if voice and voice != "no-voice":
+        audio_parts.append(f"VOICE: {voice.replace('-', ' ')}.")
+    if voice_emotion and voice_emotion != "neutral":
+        audio_parts.append(f"DEFAULT VOICE EMOTION: {voice_emotion}.")
+    if audio_notes:
+        audio_parts.append(f"NOTES: {audio_notes}.")
+
+    profile["audio_guide"] = " ".join(audio_parts)
+
+    # ===== CHARACTER GUIDE COMPILATION =====
+    char_parts = []
+    world = profile.get("world_setting", "")
+    world_tone = profile.get("world_tone", "")
+    proportions = profile.get("character_proportions", "")
+    char_design = profile.get("character_design_philosophy", "")
+    enemy = profile.get("enemy_design", "")
+    cultural = profile.get("cultural_influences", "")
+
+    if world:
+        char_parts.append(f"SETTING: {world}.")
+    if world_tone:
+        char_parts.append(f"WORLD FEEL: {world_tone.replace('-', ' ')}.")
+    if proportions:
+        char_parts.append(f"PROPORTIONS: {proportions.replace('-', ' ')}.")
+    if char_design:
+        char_parts.append(f"DESIGN APPROACH: {char_design.replace('-', ' ')}.")
+    if enemy:
+        char_parts.append(f"ENEMIES: {enemy.replace('-', ' ')}.")
+    if cultural:
+        char_parts.append(f"CULTURAL INFLUENCES: {cultural}.")
+
+    profile["character_guide"] = " ".join(char_parts)
+
+    return profile
+
+
+# ---- Style Profile API endpoints ----
+
+@app.get("/api/pixel-studio/style-profile/questions")
+async def style_profile_questions():
+    """Return the style interview questions grouped by section."""
+    by_section = {}
+    for q in STYLE_INTERVIEW_QUESTIONS:
+        sec = q.get("section", "general")
+        by_section.setdefault(sec, []).append(q)
+    section_labels = {
+        "visual": "Visual Art & Pixel Style",
+        "tone": "Tone, Maturity & Themes",
+        "writing": "Writing & Dialogue",
+        "audio": "Audio & Music",
+        "world": "World & Character Design",
+        "ui": "UI / UX Feel",
+    }
+    return {
+        "sections": [
+            {"id": sec, "label": section_labels.get(sec, sec), "questions": qs}
+            for sec, qs in by_section.items()
+        ],
+        "all_questions": STYLE_INTERVIEW_QUESTIONS,
+    }
+
+
+@app.get("/api/pixel-studio/style-profile/{project_path:path}")
+async def get_style_profile(project_path: str):
+    """Get the current style profile for a project."""
+    profile = load_style_profile(project_path)
+    return {"ok": True, "profile": profile, "has_profile": _get_style_profile_path(project_path).exists()}
+
+
+@app.post("/api/pixel-studio/style-profile/{project_path:path}")
+async def set_style_profile(project_path: str, request: Request):
+    """Set or update the style profile for a project. Accepts partial updates."""
+    data = await request.json()
+    existing = load_style_profile(project_path)
+
+    # Merge new answers into existing profile
+    for key, val in data.items():
+        if key in DEFAULT_STYLE_PROFILE:
+            existing[key] = val
+
+    # Compile derived fields
+    existing = _compile_style_profile(existing)
+    save_style_profile(project_path, existing)
+    return {"ok": True, "profile": existing}
+
+
+@app.get("/api/pixel-studio/style-profile/guides/{project_path:path}")
+async def get_style_guides(project_path: str):
+    """Return the compiled creative guides for injection into LLM prompts.
+
+    Returns separate guides for:
+    - visual: prompt_prefix + negative for image generation
+    - writing: tone, maturity, dialogue rules for text/script generation
+    - audio: music, SFX, voice direction for audio generation
+    - character: world, proportions, design approach for character creation
+    - full_brief: everything combined as a single block for general-purpose LLM context
+    """
+    profile = load_style_profile(project_path)
+    if not profile.get("writing_guide") and profile.get("tone"):
+        profile = _compile_style_profile(profile)
+        save_style_profile(project_path, profile)
+
+    full_brief_parts = []
+    if profile.get("prompt_prefix"):
+        full_brief_parts.append(f"## Visual Direction\n{profile['prompt_prefix']}")
+    if profile.get("writing_guide"):
+        full_brief_parts.append(f"## Writing Direction\n{profile['writing_guide']}")
+    if profile.get("audio_guide"):
+        full_brief_parts.append(f"## Audio Direction\n{profile['audio_guide']}")
+    if profile.get("character_guide"):
+        full_brief_parts.append(f"## Character & World Direction\n{profile['character_guide']}")
+
+    return {
+        "ok": True,
+        "visual": {
+            "prompt_prefix": profile.get("prompt_prefix", ""),
+            "negative_extra": profile.get("negative_extra", ""),
+            "palette": profile.get("palette", ""),
+            "resolution": profile.get("resolution", 64),
+            "suggested_lora": profile.get("suggested_lora", ""),
+        },
+        "writing": profile.get("writing_guide", ""),
+        "audio": profile.get("audio_guide", ""),
+        "character": profile.get("character_guide", ""),
+        "full_brief": "\n\n".join(full_brief_parts),
+        "maturity": profile.get("maturity", ""),
+        "content_boundaries": profile.get("content_boundaries", ""),
+    }
+
+
+@app.post("/api/pixel-studio/style-profile/from-reference")
+async def style_profile_from_reference(request: Request):
+    """Analyze a reference image to build a style profile. Uses Gemini Flash for analysis."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    project_path = data.get("project_path", "")
+
+    if not image_path or not Path(image_path).exists():
+        return JSONResponse({"error": "image_path required"}, status_code=400)
+
+    # Use Gemini to analyze the reference image
+    google_key = os.environ.get("GOOGLE_API_KEY", "")
+    if not google_key:
+        return JSONResponse({"error": "GOOGLE_API_KEY not set for image analysis"}, status_code=500)
+
+    import base64, httpx
+    img_bytes = Path(image_path).read_bytes()
+    img_b64 = base64.b64encode(img_bytes).decode()
+    mime = "image/png" if image_path.endswith(".png") else "image/jpeg"
+
+    analysis_prompt = (
+        "Analyze this pixel art / game art image and describe:\n"
+        "1. art_direction: Overall art style in one sentence\n"
+        "2. era_console: Which retro console era it resembles (gameboy/nes/snes/gba/genesis/c64/modern_hd/none)\n"
+        "3. palette: Closest named palette (pico8/gameboy/nes/sweetie16/endesga32/endesga64/aap64/c64/1bit)\n"
+        "4. resolution: Estimated pixel size (16/32/48/64/96/128/256)\n"
+        "5. perspective: Camera perspective (side-scroll/top-down/isometric/first-person)\n"
+        "6. color_mood: Color mood (warm/cool/dark/vibrant/pastel/neon/muted/monochrome)\n"
+        "7. special_notes: Notable style traits (outlines, dithering, etc.)\n\n"
+        "Return ONLY valid JSON with these exact keys. No markdown, no explanation."
+    )
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={google_key}",
+                json={"contents": [{"parts": [
+                    {"inline_data": {"mime_type": mime, "data": img_b64}},
+                    {"text": analysis_prompt},
+                ]}]},
+                timeout=30,
+            )
+            if r.status_code == 200:
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                # Strip markdown code fences if present
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                analysis = json.loads(text)
+
+                # Save as profile if project_path given
+                if project_path:
+                    existing = load_style_profile(project_path)
+                    for k, v in analysis.items():
+                        if k in DEFAULT_STYLE_PROFILE and v:
+                            existing[k] = v
+                    # Add reference image
+                    refs = existing.get("reference_images", [])
+                    if image_path not in refs:
+                        refs.append(image_path)
+                    existing["reference_images"] = refs
+                    existing = _compile_style_profile(existing)
+                    save_style_profile(project_path, existing)
+                    return {"ok": True, "analysis": analysis, "profile": existing}
+
+                return {"ok": True, "analysis": analysis}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    return {"ok": False, "error": "Analysis failed"}
+
+
+# --- API: Pixel Art Studio (RetroDiffusion-style local pipeline) ---
+
+# ---- Helpers ----
+
+def _build_pixel_prompt(prompt: str, style: str = "", lora_type: str = "",
+                        tiling: bool = False, extra_tags: str = "",
+                        project_path: str = "") -> tuple[str, str]:
+    """Assemble full prompt + negative from project style profile, style preset,
+    LoRA triggers, and user prompt. Project style profile takes priority."""
+    parts = []
+    neg_parts = ["worst quality, low quality, blurry, deformed, watermark, text, signature"]
+
+    # 1. Project style profile (highest priority for consistency)
+    if project_path:
+        profile = load_style_profile(project_path)
+        if profile.get("prompt_prefix"):
+            parts.append(profile["prompt_prefix"])
+        if profile.get("negative_extra"):
+            neg_parts.append(profile["negative_extra"])
+
+    # 2. Style preset (only if no project profile, or as override)
+    if style and style in PIXEL_STYLE_PRESETS:
+        preset = PIXEL_STYLE_PRESETS[style]
+        parts.append(preset["prompt_prefix"])
+        neg_parts.append(preset.get("negative_extra", ""))
+    else:
+        # Check custom styles
+        custom = _load_custom_styles()
+        if style and style in custom:
+            cs = custom[style]
+            parts.append(cs.get("prompt_prefix", ""))
+            neg_parts.append(cs.get("negative_extra", ""))
+
+    trigger = LORA_TRIGGERS.get(lora_type, "")
+    if trigger:
+        parts.append(trigger)
+    if tiling:
+        parts.append("seamless tileable pattern, repeating texture,")
+    if extra_tags:
+        parts.append(extra_tags)
+    parts.append(prompt)
+    return " ".join(p for p in parts if p), ", ".join(n for n in neg_parts if n)
+
+
+def _resolve_gen_dims(resolution: int) -> tuple[int, int]:
+    """Pick generation dimensions — generate high, pixelize down."""
+    gen = max(512, resolution * 8)
+    gen = min(gen, 1024)
+    return gen, gen
+
+
+async def _comfyui_generate(workflow: dict, output_path: Path, timeout: int = 120) -> Path:
+    """Queue workflow, poll, download first output image."""
+    from comfyui_client import queue_prompt, poll_completion, get_output_images, download_image
+    pid = queue_prompt(workflow)
+    result = poll_completion(pid, timeout=timeout)
+    imgs = get_output_images(result)
+    if not imgs:
+        raise RuntimeError("ComfyUI returned no images")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    download_image(imgs[0], output_path)
+    return output_path
+
+
+async def _comfyui_generate_all(workflow: dict, timeout: int = 120) -> list[dict]:
+    """Queue workflow, poll, return all output image infos."""
+    from comfyui_client import queue_prompt, poll_completion, get_output_images
+    pid = queue_prompt(workflow)
+    result = poll_completion(pid, timeout=timeout)
+    return get_output_images(result)
+
+
+def _post_process(output_path: Path, resolution: int, palette: str = "",
+                  repair: bool = True, remove_bg: bool = True,
+                  gen_width: int = 1024) -> dict:
+    """Post-processing pipeline: pixelize → repair → palettize → rembg."""
+    warnings = []
+    if not PIXEL_TOOLKIT_AVAILABLE:
+        return {"warnings": ["Pixel toolkit not available, skipping post-processing"]}
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(output_path).convert("RGBA")
+
+        if resolution < gen_width:
+            img = pixelize(img, target_size=resolution, num_colors=0, palette_name=palette)
+
+        if repair and resolution <= 128:
+            img = repair_pixel_grid(img, 1)
+
+        if palette and resolution >= gen_width:
+            img = reduce_palette(img, palette_name=palette)
+
+        if remove_bg:
+            temp = output_path.with_stem(output_path.stem + "_pre_rembg")
+            img.save(temp)
+            tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+            rembg_result = subprocess.run(
+                [sys.executable, str(tools_dir / "rembg_matting.py"), str(temp), "-o", str(output_path)],
+                capture_output=True, text=True, timeout=120,
+            )
+            temp.unlink(missing_ok=True)
+            if rembg_result.returncode == 0:
+                img = PILImage.open(output_path).convert("RGBA")
+            else:
+                warnings.append(f"rembg failed: {rembg_result.stderr[:200]}")
+
+        img.save(output_path)
+    except Exception as e:
+        warnings.append(f"Post-processing partial: {e}")
+    return {"warnings": warnings}
+
+
+async def _expand_prompt(prompt: str) -> str:
+    """Use Gemini Flash to expand a terse prompt into a detailed pixel art description."""
+    try:
+        google_key = os.environ.get("GOOGLE_API_KEY", "")
+        if not google_key:
+            return prompt
+        import httpx
+        expansion_prompt = (
+            "You are a pixel art prompt expander. Given a short description, expand it into a "
+            "detailed prompt for generating pixel art. Keep it under 100 words. Focus on visual "
+            "details: colors, shading, pose, perspective, background. Do NOT add quotes. "
+            f"Input: {prompt}\nExpanded:"
+        )
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={google_key}",
+                json={"contents": [{"parts": [{"text": expansion_prompt}]}]},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                expanded = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                return expanded
+    except Exception:
+        pass
+    return prompt
+
+
+# ---- Info endpoints ----
+
+@app.get("/api/pixel-studio/presets")
+async def pixel_presets():
+    """List all style presets, grouped by tier."""
+    by_tier = {"pro": {}, "fast": {}, "plus": {}}
+    for k, v in PIXEL_STYLE_PRESETS.items():
+        tier = v.get("tier", "fast")
+        by_tier.setdefault(tier, {})[k] = v
+    custom = _load_custom_styles()
+    return {"presets": by_tier, "custom": custom}
+
+
+@app.get("/api/pixel-studio/animations")
+async def pixel_animation_presets():
+    """List all animation presets."""
+    return ANIMATION_PRESETS
+
+
+@app.get("/api/pixel-studio/tilesets")
+async def pixel_tileset_presets():
+    """List all tileset presets."""
+    return TILESET_PRESETS
+
+
+@app.get("/api/pixel-studio/palettes")
+async def pixel_palettes():
+    """List all palettes with hex colors."""
+    if PIXEL_TOOLKIT_AVAILABLE:
+        return {name: [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in colors]
+                for name, colors in PIXEL_PALETTES.items()}
+    return {}
+
+
+@app.get("/api/pixel-studio/loras")
+async def pixel_loras():
+    """List available LoRAs from ComfyUI, filtered for pixel art."""
+    cfg = load_config()
+    if check_service(cfg["comfyui_port"]):
+        try:
+            from comfyui_client import list_loras
+            available = list_loras()
+            pixel_loras = [l for l in available if any(k in l.lower() for k in
+                          ["pixel", "sprite", "2d", "retro", "elusarca", "newpixel"])]
+            return {"all": available, "pixel": pixel_loras, "zit": ZIT_PIXEL_LORAS}
+        except Exception:
+            pass
+    return {"all": [], "pixel": [], "zit": ZIT_PIXEL_LORAS}
+
+
+@app.get("/api/pixel-studio/models")
+async def pixel_models():
+    """List available checkpoints, samplers, schedulers, upscale models."""
+    cfg = load_config()
+    if check_service(cfg["comfyui_port"]):
+        try:
+            from comfyui_client import list_checkpoints, list_loras, list_samplers, list_schedulers, list_upscale_models
+            return {
+                "checkpoints": list_checkpoints(),
+                "loras": list_loras(),
+                "samplers": list_samplers(),
+                "schedulers": list_schedulers(),
+                "upscale_models": list_upscale_models(),
+            }
+        except Exception:
+            pass
+    return {"checkpoints": [], "loras": [], "samplers": [], "schedulers": [], "upscale_models": []}
+
+
+@app.get("/api/pixel-studio/resolutions")
+async def pixel_resolutions():
+    return {"resolutions": PIXEL_RESOLUTIONS, "upscale_factors": UPSCALE_FACTORS,
+            "frame_durations": FRAME_DURATION_OPTIONS, "output_formats": OUTPUT_FORMATS}
+
+
+# ---- Core generation: txt2img ----
+
+@app.post("/api/pixel-studio/generate")
+async def pixel_generate(request: Request):
+    """Full pixel art generation pipeline: generate → pixelize → palettize → remove bg.
+    Mirrors RetroDiffusion /v1/inferences for txt2img."""
+    data = await request.json()
+    prompt = data.get("prompt", "")
+    style = data.get("style", "")
+    resolution = data.get("resolution", 64)
+    palette = data.get("palette", "")
+    lora_type = data.get("lora_type", "")
+    lora_name = data.get("lora_name", "")
+    remove_bg = data.get("remove_bg", True)
+    do_repair = data.get("repair_grid", True)
+    tiling = data.get("tiling", False)
+    seed = data.get("seed", None)
+    steps = data.get("steps", 25)
+    cfg_scale = data.get("cfg", 7.0)
+    sampler = data.get("sampler", "dpmpp_2m")
+    scheduler = data.get("scheduler", "karras")
+    project_path = data.get("project_path", "")
+    filename = data.get("filename", "pixel_art.png")
+    checkpoint = data.get("checkpoint", "")
+    num_images = min(data.get("num_images", 1), 4)
+    expand_prompt = data.get("expand_prompt", False)
+    return_pre_palette = data.get("return_pre_palette", False)
+    return_non_bg_removed = data.get("return_non_bg_removed", False)
+    upscale_output_factor = data.get("upscale_output_factor", None)
+
+    # Fill defaults from style preset
+    if style and style in PIXEL_STYLE_PRESETS:
+        preset = PIXEL_STYLE_PRESETS[style]
+        if not palette:
+            palette = preset.get("suggested_palette", "")
+        if not lora_type:
+            lora_type = preset.get("suggested_lora", "sprite_64")
+        if not resolution or resolution == 64:
+            resolution = preset.get("suggested_resolution", 64)
+
+    cfg_obj = load_config()
+    if not check_service(cfg_obj["comfyui_port"]):
+        return JSONResponse({"error": "ComfyUI not running"}, status_code=503)
+
+    if expand_prompt:
+        prompt = await _expand_prompt(prompt)
+
+    # Apply project style profile defaults
+    if project_path:
+        profile = load_style_profile(project_path)
+        if not palette and profile.get("palette"):
+            palette = profile["palette"]
+        if not lora_type and profile.get("suggested_lora"):
+            lora_type = profile["suggested_lora"]
+        if (not resolution or resolution == 64) and profile.get("resolution"):
+            resolution = profile["resolution"]
+        if not style and profile.get("suggested_style_preset"):
+            style = profile["suggested_style_preset"]
+
+    full_prompt, full_negative = _build_pixel_prompt(prompt, style, lora_type, tiling,
+                                                      project_path=project_path)
+    gen_w, gen_h = _resolve_gen_dims(resolution)
+
+    from comfyui_client import (build_txt2img_with_lora_workflow, build_txt2img_workflow,
+                                 build_tiling_workflow, download_image as dl_img)
+
+    results = []
+    for i in range(num_images):
+        fname = filename if num_images == 1 else f"{Path(filename).stem}_{i}{Path(filename).suffix}"
+        out_path = Path(project_path) / "assets" / "img" / fname if project_path else Path(fname)
+
+        if tiling:
+            wf = build_tiling_workflow(
+                prompt=full_prompt, negative=full_negative,
+                checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+                lora_name=lora_name, lora_strength=0.8,
+                width=gen_w, height=gen_h, steps=steps, cfg=cfg_scale,
+                sampler=sampler, scheduler=scheduler, seed=seed,
+            )
+        elif lora_name:
+            wf = build_txt2img_with_lora_workflow(
+                prompt=full_prompt, negative=full_negative,
+                checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+                lora_name=lora_name, lora_strength=0.8,
+                width=gen_w, height=gen_h, steps=steps, cfg=cfg_scale,
+                sampler=sampler, scheduler=scheduler, seed=seed,
+            )
+        else:
+            wf = build_txt2img_workflow(
+                prompt=full_prompt, negative=full_negative,
+                checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+                width=gen_w, height=gen_h, steps=steps, cfg=cfg_scale,
+                sampler=sampler, scheduler=scheduler, seed=seed,
+            )
+
+        try:
+            await _comfyui_generate(wf, out_path)
+        except Exception as e:
+            results.append({"ok": False, "error": str(e), "filename": fname})
+            continue
+
+        extras = {}
+        if return_pre_palette and PIXEL_TOOLKIT_AVAILABLE:
+            pre_path = out_path.with_stem(out_path.stem + "_pre_palette")
+            from PIL import Image as PILImage
+            PILImage.open(out_path).save(pre_path)
+            extras["pre_palette_path"] = str(pre_path)
+
+        pp = _post_process(out_path, resolution, palette, do_repair, remove_bg, gen_w)
+
+        if return_non_bg_removed and remove_bg:
+            extras["non_bg_removed_note"] = "Save pre-rembg copy via return_pre_palette"
+
+        # Optional upscale
+        if upscale_output_factor and upscale_output_factor > 1 and PIXEL_TOOLKIT_AVAILABLE:
+            from PIL import Image as PILImage
+            img = PILImage.open(out_path).convert("RGBA")
+            new_w = img.width * upscale_output_factor
+            new_h = img.height * upscale_output_factor
+            img = img.resize((new_w, new_h), resample=PILImage.NEAREST)
+            img.save(out_path)
+
+        results.append({
+            "ok": True, "path": str(out_path), "resolution": resolution,
+            "palette": palette, "style": style, "prompt_used": full_prompt,
+            **extras, **{k: v for k, v in pp.items() if v},
+        })
+
+    if num_images == 1:
+        return results[0]
+    return {"ok": True, "images": results, "count": len(results)}
+
+
+# ---- img2img ----
+
+@app.post("/api/pixel-studio/img2img")
+async def pixel_img2img(request: Request):
+    """Image-to-image pixel art generation. Upload a reference, restyle as pixel art."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    prompt = data.get("prompt", "")
+    style = data.get("style", "")
+    strength = data.get("strength", 0.6)
+    resolution = data.get("resolution", 64)
+    palette = data.get("palette", "")
+    lora_type = data.get("lora_type", "")
+    lora_name = data.get("lora_name", "")
+    remove_bg = data.get("remove_bg", True)
+    do_repair = data.get("repair_grid", True)
+    seed = data.get("seed", None)
+    steps = data.get("steps", 25)
+    cfg_scale = data.get("cfg", 7.0)
+    sampler = data.get("sampler", "dpmpp_2m")
+    scheduler = data.get("scheduler", "karras")
+    project_path = data.get("project_path", "")
+    filename = data.get("filename", "pixel_i2i.png")
+    checkpoint = data.get("checkpoint", "")
+
+    if not image_path or not Path(image_path).exists():
+        return JSONResponse({"error": "image_path required and must exist"}, status_code=400)
+
+    cfg_obj = load_config()
+    if not check_service(cfg_obj["comfyui_port"]):
+        return JSONResponse({"error": "ComfyUI not running"}, status_code=503)
+
+    from comfyui_client import upload_image, build_img2img_workflow, build_img2img_with_lora_workflow
+
+    uploaded_name = upload_image(Path(image_path))
+    full_prompt, full_negative = _build_pixel_prompt(prompt, style, lora_type,
+                                                      project_path=project_path)
+    out_path = Path(project_path) / "assets" / "img" / filename if project_path else Path(filename)
+
+    if lora_name:
+        wf = build_img2img_with_lora_workflow(
+            image_filename=uploaded_name, prompt=full_prompt, negative=full_negative,
+            checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+            lora_name=lora_name, lora_strength=0.8, denoise=strength,
+            steps=steps, cfg=cfg_scale, sampler=sampler, scheduler=scheduler, seed=seed,
+        )
+    else:
+        wf = build_img2img_workflow(
+            image_filename=uploaded_name, prompt=full_prompt, negative=full_negative,
+            checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+            denoise=strength, steps=steps, cfg=cfg_scale,
+            sampler=sampler, scheduler=scheduler, seed=seed,
+        )
+
+    try:
+        await _comfyui_generate(wf, out_path)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    gen_w = 1024  # img2img uses input image dims
+    pp = _post_process(out_path, resolution, palette, do_repair, remove_bg, gen_w)
+    return {"ok": True, "path": str(out_path), "resolution": resolution,
+            "palette": palette, "style": style, **{k: v for k, v in pp.items() if v}}
+
+
+# ---- Pixelate (convert any image to pixel art) ----
+
+@app.post("/api/pixel-studio/pixelate")
+async def pixel_pixelate(request: Request):
+    """Convert any image into pixel art. Like RetroDiffusion's rd_pro__pixelate."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    input_image_b64 = data.get("input_image", "")
+    target_size = data.get("target_size", data.get("width", 64))
+    palette = data.get("palette", "")
+    colors = data.get("colors", 0)
+    dither = data.get("dither", False)
+    remove_bg = data.get("remove_bg", False)
+    output_path = data.get("output_path", "")
+
+    if not PIXEL_TOOLKIT_AVAILABLE:
+        return JSONResponse({"error": "Pixel toolkit not available"}, status_code=500)
+
+    from PIL import Image as PILImage
+    import base64, io
+
+    if input_image_b64:
+        img_bytes = base64.b64decode(input_image_b64)
+        img = PILImage.open(io.BytesIO(img_bytes)).convert("RGBA")
+        if not output_path:
+            output_path = "pixelated_output.png"
+    elif image_path:
+        img = PILImage.open(image_path).convert("RGBA")
+        if not output_path:
+            output_path = str(Path(image_path).with_stem(Path(image_path).stem + "_pixel"))
+    else:
+        return JSONResponse({"error": "image_path or input_image required"}, status_code=400)
+
+    result = pixelize(img, target_size, colors, palette, dither)
+
+    if remove_bg:
+        temp = Path(output_path).with_stem(Path(output_path).stem + "_tmp")
+        temp.parent.mkdir(parents=True, exist_ok=True)
+        result.save(temp)
+        tools_dir = SKILLS_DIR / "godotsmith" / "tools"
+        subprocess.run(
+            [sys.executable, str(tools_dir / "rembg_matting.py"), str(temp), "-o", str(output_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        temp.unlink(missing_ok=True)
+        result = PILImage.open(output_path).convert("RGBA")
+    else:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        result.save(output_path)
+
+    # Return base64 too for API consumers
+    buf = io.BytesIO()
+    result.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
+    return {"ok": True, "path": str(output_path), "size": list(result.size),
+            "base64_image": b64}
+
+
+# ---- Edit / Inpaint ----
+
+@app.post("/api/pixel-studio/edit")
+async def pixel_edit(request: Request):
+    """Progressive image editing via inpainting. Like RetroDiffusion /v1/edit."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    input_image_b64 = data.get("input_image", "")
+    mask_path = data.get("mask_path", "")
+    mask_b64 = data.get("mask", "")
+    prompt = data.get("prompt", "")
+    strength = data.get("strength", 0.8)
+    style = data.get("style", "")
+    resolution = data.get("resolution", 64)
+    palette = data.get("palette", "")
+    seed = data.get("seed", None)
+    steps = data.get("steps", 25)
+    cfg_scale = data.get("cfg", 7.0)
+    checkpoint = data.get("checkpoint", "")
+    output_path = data.get("output_path", "")
+    project_path = data.get("project_path", "")
+
+    cfg_obj = load_config()
+    if not check_service(cfg_obj["comfyui_port"]):
+        return JSONResponse({"error": "ComfyUI not running"}, status_code=503)
+
+    from comfyui_client import upload_image, build_inpaint_workflow
+    from PIL import Image as PILImage
+    import base64, io
+
+    # Handle base64 inputs
+    if input_image_b64 and not image_path:
+        img_bytes = base64.b64decode(input_image_b64)
+        tmp_img = Path("_edit_input.png")
+        tmp_img.write_bytes(img_bytes)
+        image_path = str(tmp_img)
+
+    if mask_b64 and not mask_path:
+        mask_bytes = base64.b64decode(mask_b64)
+        tmp_mask = Path("_edit_mask.png")
+        tmp_mask.write_bytes(mask_bytes)
+        mask_path = str(tmp_mask)
+
+    if not image_path or not mask_path:
+        return JSONResponse({"error": "image_path + mask_path (or base64 equivalents) required"}, status_code=400)
+
+    uploaded_img = upload_image(Path(image_path))
+    uploaded_mask = upload_image(Path(mask_path))
+
+    full_prompt, full_negative = _build_pixel_prompt(prompt, style, project_path=project_path)
+    if not output_path:
+        output_path = str(Path(image_path).with_stem(Path(image_path).stem + "_edited"))
+
+    wf = build_inpaint_workflow(
+        image_filename=uploaded_img, mask_filename=uploaded_mask,
+        prompt=full_prompt, negative=full_negative,
+        checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+        denoise=strength, steps=steps, cfg=cfg_scale, seed=seed,
+    )
+
+    out = Path(output_path)
+    try:
+        await _comfyui_generate(wf, out)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    pp = _post_process(out, resolution, palette, repair=True, remove_bg=False, gen_width=1024)
+
+    buf = io.BytesIO()
+    PILImage.open(out).save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
+    return {"ok": True, "path": str(out), "base64_image": b64,
+            **{k: v for k, v in pp.items() if v}}
+
+
+# ---- Animation ----
+
+@app.post("/api/pixel-studio/animate")
+async def pixel_animate(request: Request):
+    """Generate animated sprite sheets / GIFs. Covers walk cycles, attacks, VFX, etc."""
+    data = await request.json()
+    prompt = data.get("prompt", "")
+    animation_type = data.get("animation_type", "idle")
+    input_image = data.get("input_image_path", "")
+    resolution = data.get("resolution", 0)
+    frames_duration = data.get("frames_duration", 0)
+    palette = data.get("palette", "")
+    lora_type = data.get("lora_type", "")
+    lora_name = data.get("lora_name", "")
+    return_spritesheet = data.get("return_spritesheet", True)
+    return_gif = data.get("return_gif", True)
+    fps = data.get("fps", 8)
+    style = data.get("style", "")
+    seed = data.get("seed", None)
+    steps = data.get("steps", 25)
+    cfg_scale = data.get("cfg", 7.0)
+    sampler = data.get("sampler", "dpmpp_2m")
+    scheduler = data.get("scheduler", "karras")
+    checkpoint = data.get("checkpoint", "")
+    project_path = data.get("project_path", "")
+    filename = data.get("filename", "animation")
+
+    if animation_type not in ANIMATION_PRESETS:
+        return JSONResponse({"error": f"Unknown animation_type. Options: {list(ANIMATION_PRESETS.keys())}"},
+                          status_code=400)
+
+    anim = ANIMATION_PRESETS[animation_type]
+
+    # Resolve frame count
+    if frames_duration and "frames_options" in anim:
+        if frames_duration not in anim["frames_options"]:
+            frames_duration = anim.get("default_frames", 8)
+    else:
+        frames_duration = anim.get("frames", anim.get("default_frames", 8))
+
+    # Resolve resolution
+    if not resolution:
+        resolution = anim.get("default_size", 64)
+    resolution = min(resolution, anim.get("max_size", 256))
+
+    columns = anim.get("columns", 4)
+    rows = math.ceil(frames_duration / columns)
+
+    cfg_obj = load_config()
+    if not check_service(cfg_obj["comfyui_port"]):
+        return JSONResponse({"error": "ComfyUI not running"}, status_code=503)
+
+    # Build animation prompt
+    anim_prompt = anim["prompt_template"].format(prompt=prompt, extra_prompt=prompt)
+    if not lora_type:
+        lora_type = "character" if anim.get("type") in ("character", "advanced") else "sprite_64"
+
+    full_prompt, full_negative = _build_pixel_prompt(anim_prompt, style, lora_type,
+                                                      project_path=project_path)
+
+    # Generate a sprite sheet as a single image (batch of frames in one generation)
+    # We generate at higher res, then pixelize each frame down
+    sheet_w = resolution * columns
+    sheet_h = resolution * rows
+    gen_w = max(512, min(1024, sheet_w * 4))
+    gen_h = max(512, min(1024, sheet_h * 4))
+    # Keep aspect ratio close to sheet
+    ar = sheet_w / sheet_h if sheet_h > 0 else 1.0
+    if ar > 1:
+        gen_h = max(512, int(gen_w / ar))
+    else:
+        gen_w = max(512, int(gen_h * ar))
+    gen_w = (gen_w // 8) * 8
+    gen_h = (gen_h // 8) * 8
+
+    from comfyui_client import build_txt2img_with_lora_workflow, build_txt2img_workflow
+
+    if lora_name:
+        wf = build_txt2img_with_lora_workflow(
+            prompt=full_prompt, negative=full_negative,
+            checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+            lora_name=lora_name, lora_strength=0.8,
+            width=gen_w, height=gen_h, steps=steps, cfg=cfg_scale,
+            sampler=sampler, scheduler=scheduler, seed=seed,
+        )
+    else:
+        wf = build_txt2img_workflow(
+            prompt=full_prompt, negative=full_negative,
+            checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+            width=gen_w, height=gen_h, steps=steps, cfg=cfg_scale,
+            sampler=sampler, scheduler=scheduler, seed=seed,
+        )
+
+    base_dir = Path(project_path) / "assets" / "img" if project_path else Path(".")
+    sheet_path = base_dir / f"{filename}_sheet.png"
+
+    try:
+        await _comfyui_generate(wf, sheet_path)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    result = {"ok": True, "animation_type": animation_type, "frames": frames_duration,
+              "columns": columns, "rows": rows, "resolution": resolution}
+
+    # Post-process: pixelize the sheet down to target size, then extract frames
+    if PIXEL_TOOLKIT_AVAILABLE:
+        from PIL import Image as PILImage
+        sheet_img = PILImage.open(sheet_path).convert("RGBA")
+
+        # Resize to exact sheet dimensions
+        target_w = resolution * columns
+        target_h = resolution * rows
+        sheet_img = sheet_img.resize((target_w, target_h), resample=PILImage.NEAREST)
+
+        if palette:
+            sheet_img_rgb = sheet_img.convert("RGB")
+            from PIL import Image as PILImg
+            sheet_img_reduced = reduce_palette(sheet_img, palette_name=palette)
+            sheet_img = sheet_img_reduced
+
+        sheet_img.save(sheet_path)
+        result["spritesheet_path"] = str(sheet_path)
+
+        # Extract frames
+        frames = extract_frames(sheet_img, columns, rows)
+        frames = frames[:frames_duration]  # Trim to exact count
+
+        if return_gif and frames:
+            gif_path = base_dir / f"{filename}.gif"
+            save_gif(frames, gif_path, fps)
+            result["gif_path"] = str(gif_path)
+
+    return result
+
+
+# ---- Tilesets ----
+
+@app.post("/api/pixel-studio/tileset")
+async def pixel_tileset(request: Request):
+    """Generate tileset sprites. Wang tilesets, single tiles, variations, objects."""
+    data = await request.json()
+    prompt = data.get("prompt", "")
+    extra_prompt = data.get("extra_prompt", "")
+    tileset_type = data.get("tileset_type", "single_tile")
+    resolution = data.get("resolution", 0)
+    palette = data.get("palette", "")
+    input_image_path = data.get("input_image_path", "")
+    extra_input_image_path = data.get("extra_input_image_path", "")
+    lora_name = data.get("lora_name", "")
+    seed = data.get("seed", None)
+    steps = data.get("steps", 25)
+    cfg_scale = data.get("cfg", 7.0)
+    sampler = data.get("sampler", "dpmpp_2m")
+    scheduler = data.get("scheduler", "karras")
+    checkpoint = data.get("checkpoint", "")
+    project_path = data.get("project_path", "")
+    filename = data.get("filename", "tileset.png")
+
+    if tileset_type not in TILESET_PRESETS:
+        return JSONResponse({"error": f"Unknown tileset_type. Options: {list(TILESET_PRESETS.keys())}"},
+                          status_code=400)
+
+    tile_cfg = TILESET_PRESETS[tileset_type]
+    if not resolution:
+        resolution = tile_cfg.get("default_size", 32)
+    resolution = max(tile_cfg.get("min_size", 16), min(resolution, tile_cfg.get("max_size", 64)))
+
+    cfg_obj = load_config()
+    if not check_service(cfg_obj["comfyui_port"]):
+        return JSONResponse({"error": "ComfyUI not running"}, status_code=503)
+
+    tile_prompt = tile_cfg["prompt_template"].format(prompt=prompt, extra_prompt=extra_prompt)
+    full_prompt, full_negative = _build_pixel_prompt(tile_prompt, "", "tileset", tiling=True,
+                                                      project_path=project_path)
+
+    from comfyui_client import build_tiling_workflow
+
+    # For wang tilesets, generate larger to get all tiles
+    if tile_cfg["type"] in ("wang", "wang_advanced"):
+        gen_size = max(512, resolution * 16)
+    elif tile_cfg["type"] == "variation":
+        gen_size = max(512, resolution * 8)
+    else:
+        gen_size = max(512, resolution * 8)
+    gen_size = min(gen_size, 1024)
+
+    wf = build_tiling_workflow(
+        prompt=full_prompt, negative=full_negative,
+        checkpoint=checkpoint or "juggernautXL_ragnarokBy.safetensors",
+        lora_name=lora_name, lora_strength=0.8,
+        width=gen_size, height=gen_size, steps=steps, cfg=cfg_scale,
+        sampler=sampler, scheduler=scheduler, seed=seed,
+    )
+
+    out_path = Path(project_path) / "assets" / "img" / filename if project_path else Path(filename)
+    try:
+        await _comfyui_generate(wf, out_path)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    # Post-process: pixelize to tile resolution
+    if PIXEL_TOOLKIT_AVAILABLE:
+        from PIL import Image as PILImage
+        img = PILImage.open(out_path).convert("RGBA")
+        # Resize to nearest multiple of tile size
+        tw = (img.width // resolution) * resolution
+        th = (img.height // resolution) * resolution
+        img = img.resize((tw, th), resample=PILImage.NEAREST)
+        if palette:
+            img = reduce_palette(img, palette_name=palette)
+        img.save(out_path)
+
+    return {"ok": True, "path": str(out_path), "tileset_type": tileset_type,
+            "tile_size": resolution, "palette": palette}
+
+
+# ---- Upscale ----
+
+@app.post("/api/pixel-studio/upscale")
+async def pixel_upscale(request: Request):
+    """Upscale pixel art. Nearest-neighbor for pixel-perfect, or model-based for detail."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    input_image_b64 = data.get("input_image", "")
+    factor = data.get("factor", 4)
+    method = data.get("method", "nearest")  # "nearest" or "model"
+    model_name = data.get("model_name", "4x-UltraSharp.pth")
+    output_path = data.get("output_path", "")
+
+    from PIL import Image as PILImage
+    import base64, io
+
+    if input_image_b64:
+        img = PILImage.open(io.BytesIO(base64.b64decode(input_image_b64))).convert("RGBA")
+        if not output_path:
+            output_path = "upscaled_output.png"
+    elif image_path:
+        img = PILImage.open(image_path).convert("RGBA")
+        if not output_path:
+            output_path = str(Path(image_path).with_stem(Path(image_path).stem + f"_{factor}x"))
+    else:
+        return JSONResponse({"error": "image_path or input_image required"}, status_code=400)
+
+    if method == "nearest":
+        new_w = img.width * factor
+        new_h = img.height * factor
+        result = img.resize((new_w, new_h), resample=PILImage.NEAREST)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        result.save(output_path)
+    elif method == "model":
+        cfg_obj = load_config()
+        if not check_service(cfg_obj["comfyui_port"]):
+            return JSONResponse({"error": "ComfyUI not running for model upscale"}, status_code=503)
+        from comfyui_client import upload_image, build_upscale_workflow
+        # Save temp for upload
+        tmp = Path("_upscale_input.png")
+        img.save(tmp)
+        uploaded = upload_image(tmp)
+        wf = build_upscale_workflow(image_filename=uploaded, upscale_model=model_name)
+        try:
+            await _comfyui_generate(wf, Path(output_path))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        finally:
+            tmp.unlink(missing_ok=True)
+    else:
+        return JSONResponse({"error": f"Unknown method: {method}. Use 'nearest' or 'model'"},
+                          status_code=400)
+
+    # Return base64
+    result_img = PILImage.open(output_path)
+    buf = io.BytesIO()
+    result_img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
+    return {"ok": True, "path": str(output_path), "factor": factor, "method": method,
+            "size": list(result_img.size), "base64_image": b64}
+
+
+# ---- Post-processing tools ----
+
+@app.post("/api/pixel-studio/pixelize")
+async def pixel_pixelize(request: Request):
+    """Pixelize an existing image (alias for backward compat)."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    target_size = data.get("target_size", 64)
+    palette = data.get("palette", "")
+    colors = data.get("colors", 0)
+    dither = data.get("dither", False)
+
+    if not PIXEL_TOOLKIT_AVAILABLE:
+        return JSONResponse({"error": "Pixel toolkit not available"}, status_code=500)
+
+    from PIL import Image as PILImage
+    img = PILImage.open(image_path).convert("RGBA")
+    result = pixelize(img, target_size, colors, palette, dither)
+    output = Path(image_path).with_stem(Path(image_path).stem + "_pixel")
+    result.save(output)
+    return {"ok": True, "path": str(output), "size": list(result.size)}
+
+
+@app.post("/api/pixel-studio/palettize")
+async def pixel_palettize(request: Request):
+    """Apply palette to an image."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    palette = data.get("palette", "pico8")
+    colors = data.get("colors", 16)
+    dither = data.get("dither", False)
+
+    if not PIXEL_TOOLKIT_AVAILABLE:
+        return JSONResponse({"error": "Pixel toolkit not available"}, status_code=500)
+
+    from PIL import Image as PILImage
+    img = PILImage.open(image_path).convert("RGBA")
+    result = reduce_palette(img, colors, palette, dither)
+    output = Path(image_path).with_stem(Path(image_path).stem + f"_{palette}")
+    result.save(output)
+    return {"ok": True, "path": str(output)}
+
+
+@app.post("/api/pixel-studio/repair")
+async def pixel_repair(request: Request):
+    """Repair pixel grid alignment."""
+    data = await request.json()
+    image_path = data.get("image_path", "")
+    pixel_size = data.get("pixel_size", 0)
+
+    if not PIXEL_TOOLKIT_AVAILABLE:
+        return JSONResponse({"error": "Pixel toolkit not available"}, status_code=500)
+
+    from PIL import Image as PILImage
+    img = PILImage.open(image_path).convert("RGBA")
+    if pixel_size == 0:
+        h, v = detect_pixel_size(img)
+        pixel_size = max(h, v)
+    result = repair_pixel_grid(img, pixel_size)
+    output = Path(image_path).with_stem(Path(image_path).stem + "_repaired")
+    result.save(output)
+    return {"ok": True, "path": str(output), "pixel_size": pixel_size}
+
+
+@app.post("/api/pixel-studio/spritesheet")
+async def pixel_spritesheet(request: Request):
+    """Assemble frames into a sprite sheet."""
+    data = await request.json()
+    frame_paths = data.get("frame_paths", [])
+    columns = data.get("columns", 4)
+    output_path = data.get("output_path", "")
+
+    if not frame_paths or not output_path:
+        return JSONResponse({"error": "frame_paths and output_path required"}, status_code=400)
+
+    from PIL import Image as PILImage
+    frames = [PILImage.open(p).convert("RGBA") for p in frame_paths]
+    sheet = make_spritesheet(frames, columns)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path)
+    return {"ok": True, "path": output_path, "frames": len(frames), "size": list(sheet.size)}
+
+
+@app.post("/api/pixel-studio/gif")
+async def pixel_gif(request: Request):
+    """Create animated GIF from sprite sheet or frame paths."""
+    data = await request.json()
+    sheet_path = data.get("sheet_path", "")
+    frame_paths = data.get("frame_paths", [])
+    columns = data.get("columns", 4)
+    rows = data.get("rows", 4)
+    fps = data.get("fps", 8)
+    output_path = data.get("output_path", "")
+
+    if not output_path:
+        return JSONResponse({"error": "output_path required"}, status_code=400)
+
+    from PIL import Image as PILImage
+    if sheet_path:
+        sheet = PILImage.open(sheet_path).convert("RGBA")
+        frames = extract_frames(sheet, columns, rows)
+    elif frame_paths:
+        frames = [PILImage.open(p).convert("RGBA") for p in frame_paths]
+    else:
+        return JSONResponse({"error": "Provide sheet_path or frame_paths"}, status_code=400)
+
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    save_gif(frames, out, fps)
+    return {"ok": True, "path": str(out), "frames": len(frames), "fps": fps}
+
+
+# ---- Batch generation ----
+
+@app.post("/api/pixel-studio/batch")
+async def pixel_batch(request: Request):
+    """Generate multiple pixel art images with different seeds."""
+    data = await request.json()
+    count = min(data.get("count", 1), 8)
+    data["num_images"] = count
+    data["seed"] = None  # Force random seed per image
+
+    # Reuse the generate endpoint logic
+    from starlette.testclient import TestClient
+    # Direct call with modified data
+    class FakeRequest:
+        async def json(self):
+            return data
+    return await pixel_generate(FakeRequest())
+
+
+# ---- Prompt expansion ----
+
+@app.post("/api/pixel-studio/expand-prompt")
+async def pixel_expand_prompt(request: Request):
+    """Expand a terse prompt into a detailed pixel art description via LLM."""
+    data = await request.json()
+    prompt = data.get("prompt", "")
+    if not prompt:
+        return JSONResponse({"error": "prompt required"}, status_code=400)
+    expanded = await _expand_prompt(prompt)
+    return {"ok": True, "original": prompt, "expanded": expanded}
+
+
+# ---- User custom styles CRUD ----
+
+@app.get("/api/pixel-studio/styles")
+async def pixel_list_styles():
+    """List user-created custom styles."""
+    return _load_custom_styles()
+
+
+@app.post("/api/pixel-studio/styles")
+async def pixel_create_style(request: Request):
+    """Create a user-defined custom style."""
+    data = await request.json()
+    style_id = data.get("id", "").replace(" ", "_").lower()
+    if not style_id:
+        return JSONResponse({"error": "id required"}, status_code=400)
+
+    styles = _load_custom_styles()
+    styles[style_id] = {
+        "name": data.get("name", style_id),
+        "icon": data.get("icon", "🎨"),
+        "prompt_prefix": data.get("prompt_prefix", ""),
+        "negative_extra": data.get("negative_extra", ""),
+        "suggested_palette": data.get("suggested_palette", ""),
+        "suggested_lora": data.get("suggested_lora", "sprite_64"),
+        "suggested_resolution": data.get("suggested_resolution", 64),
+        "reference_image": data.get("reference_image", ""),
+        "llm_instructions": data.get("llm_instructions", ""),
+        "force_palette": data.get("force_palette", ""),
+        "force_bg_removal": data.get("force_bg_removal", False),
+    }
+    _save_custom_styles(styles)
+    return {"ok": True, "id": style_id, "style": styles[style_id]}
+
+
+@app.patch("/api/pixel-studio/styles/{style_id}")
+async def pixel_update_style(style_id: str, request: Request):
+    """Update a user-defined custom style."""
+    styles = _load_custom_styles()
+    if style_id not in styles:
+        return JSONResponse({"error": "Style not found"}, status_code=404)
+    data = await request.json()
+    for key in data:
+        if key in styles[style_id]:
+            styles[style_id][key] = data[key]
+    _save_custom_styles(styles)
+    return {"ok": True, "id": style_id, "style": styles[style_id]}
+
+
+@app.delete("/api/pixel-studio/styles/{style_id}")
+async def pixel_delete_style(style_id: str):
+    """Delete a user-defined custom style."""
+    styles = _load_custom_styles()
+    if style_id not in styles:
+        return JSONResponse({"error": "Style not found"}, status_code=404)
+    del styles[style_id]
+    _save_custom_styles(styles)
+    return {"ok": True, "deleted": style_id}
 
 
 # --- API: VNCCS Character Pipeline ---
@@ -1454,6 +3334,45 @@ async def regenerate_asset(request: Request):
 
 
 from asset_catalog import get_catalog, search_catalog
+from pixel_art_presets import (
+    PIXEL_STYLE_PRESETS, LORA_TRIGGERS, PIXEL_RESOLUTIONS, ZIT_PIXEL_LORAS,
+    PIXEL_LORA_VARIANTS, ANIMATION_PRESETS, TILESET_PRESETS, EXTRA_PALETTES,
+    UPSCALE_FACTORS, FRAME_DURATION_OPTIONS, OUTPUT_FORMATS,
+)
+
+
+def resolve_pixel_lora(lora_key: str, available_loras: list[str] | None = None) -> str:
+    """Resolve a pixel LoRA key to an actual filename available in ComfyUI.
+    Checks PIXEL_LORA_VARIANTS for all known filenames, returns first match."""
+    if lora_key in PIXEL_LORA_VARIANTS:
+        for variant in PIXEL_LORA_VARIANTS[lora_key]:
+            if available_loras is None:
+                return variant  # No list to check against, return first
+            if variant in available_loras:
+                return variant
+    return ZIT_PIXEL_LORAS.get(lora_key, "")
+
+# Import pixel art toolkit functions for fast in-process calls
+sys.path.insert(0, str(SKILLS_DIR / "godotsmith" / "tools"))
+try:
+    from pixel_art_toolkit import (
+        pixelize, reduce_palette, repair_pixel_grid, detect_pixel_size,
+        make_spritesheet, extract_frames, save_gif, make_gif, PALETTES as PIXEL_PALETTES,
+    )
+    PIXEL_TOOLKIT_AVAILABLE = True
+except ImportError:
+    PIXEL_TOOLKIT_AVAILABLE = False
+
+# User custom styles storage
+CUSTOM_STYLES_PATH = Path(__file__).parent / "pixel_custom_styles.json"
+
+def _load_custom_styles() -> dict:
+    if CUSTOM_STYLES_PATH.exists():
+        return json.loads(CUSTOM_STYLES_PATH.read_text())
+    return {}
+
+def _save_custom_styles(styles: dict):
+    CUSTOM_STYLES_PATH.write_text(json.dumps(styles, indent=2))
 
 # --- API: Curated Asset Catalog ---
 

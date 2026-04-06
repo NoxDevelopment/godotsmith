@@ -99,6 +99,88 @@ PALETTES = {
         (80,48,52), (109,62,56), (148,81,60), (193,112,68),
         (230,157,82), (246,202,108), (249,231,163), (252,250,222),
     ],
+    # --- Extended palettes ---
+    "1bit": [(0, 0, 0), (255, 255, 255)],
+    "1bit_amber": [(0, 0, 0), (255, 176, 0)],
+    "1bit_green": [(0, 0, 0), (0, 255, 65)],
+    "cga": [(0, 0, 0), (85, 255, 255), (255, 85, 255), (255, 255, 255)],
+    "cga_red": [(0, 0, 0), (85, 255, 85), (255, 85, 85), (255, 255, 85)],
+    "c64": [
+        (0, 0, 0), (255, 255, 255), (136, 0, 0), (170, 255, 238),
+        (204, 68, 204), (0, 204, 85), (0, 0, 170), (238, 238, 119),
+        (221, 136, 85), (102, 68, 0), (255, 119, 119), (51, 51, 51),
+        (119, 119, 119), (170, 255, 102), (0, 136, 255), (187, 187, 187),
+    ],
+    "mc": [
+        (86, 125, 70), (139, 105, 77), (100, 100, 100), (50, 50, 50),
+        (180, 160, 120), (60, 40, 30), (70, 130, 180), (200, 200, 200),
+        (170, 50, 50), (40, 80, 40), (140, 140, 60), (100, 60, 30),
+        (80, 80, 120), (200, 180, 140), (120, 80, 60), (30, 30, 50),
+    ],
+    "zx": [
+        (0, 0, 0), (0, 0, 215), (215, 0, 0), (215, 0, 215),
+        (0, 215, 0), (0, 215, 215), (215, 215, 0), (215, 215, 215),
+        (0, 0, 255), (255, 0, 0), (255, 0, 255),
+        (0, 255, 0), (0, 255, 255), (255, 255, 0), (255, 255, 255),
+    ],
+    "msx": [
+        (0, 0, 0), (1, 1, 1), (62, 184, 73), (116, 208, 125),
+        (89, 85, 224), (128, 118, 241), (185, 94, 81), (101, 219, 239),
+        (219, 101, 89), (255, 137, 125), (204, 195, 94), (222, 208, 135),
+        (58, 162, 65), (183, 102, 181), (204, 204, 204), (255, 255, 255),
+    ],
+    "nostalgia": [
+        (208, 208, 88), (160, 168, 64), (112, 128, 40), (64, 88, 16),
+        (216, 176, 112), (184, 136, 80), (136, 96, 48), (88, 56, 16),
+        (200, 120, 88), (160, 80, 56), (120, 48, 32), (80, 24, 16),
+        (168, 168, 168), (120, 120, 120), (72, 72, 72), (24, 24, 24),
+    ],
+    "resurrect64": [
+        (46, 34, 47), (62, 53, 70), (80, 73, 95), (101, 97, 115),
+        (146, 143, 151), (198, 195, 198), (226, 226, 219), (245, 243, 240),
+        (255, 166, 119), (255, 130, 73), (211, 95, 63), (163, 64, 53),
+        (119, 41, 44), (87, 28, 39), (55, 22, 36), (34, 15, 30),
+        (194, 185, 121), (162, 162, 80), (121, 141, 59), (79, 121, 66),
+        (46, 99, 74), (28, 74, 81), (22, 50, 74), (25, 32, 52),
+        (64, 128, 168), (107, 162, 195), (157, 199, 207), (194, 228, 216),
+        (243, 200, 163), (229, 171, 125), (191, 128, 97), (153, 97, 80),
+        (255, 210, 63), (245, 169, 59), (220, 125, 72), (190, 90, 63),
+        (196, 79, 119), (165, 55, 109), (118, 40, 93), (73, 36, 79),
+        (107, 172, 172), (82, 139, 141), (55, 103, 113), (36, 70, 89),
+        (36, 36, 55), (58, 48, 66), (84, 64, 76), (116, 87, 85),
+        (157, 116, 96), (191, 149, 116), (211, 177, 143), (236, 210, 178),
+        (255, 234, 195), (255, 247, 221), (239, 216, 191), (211, 186, 168),
+        (179, 153, 146), (145, 124, 124), (115, 99, 102), (89, 77, 82),
+        (61, 57, 63), (42, 39, 49), (30, 27, 36), (17, 14, 22),
+    ],
+    "apollo": [
+        (23, 14, 22), (38, 31, 41), (46, 46, 64), (57, 67, 86),
+        (79, 96, 110), (106, 128, 130), (145, 166, 151), (181, 199, 170),
+        (220, 229, 199), (147, 105, 78), (119, 72, 54), (94, 47, 40),
+        (68, 32, 32), (43, 22, 27), (115, 41, 48), (167, 60, 63),
+        (202, 98, 72), (222, 142, 81), (239, 185, 100), (246, 226, 144),
+        (209, 155, 128), (179, 113, 105), (151, 78, 90), (116, 51, 75),
+        (75, 37, 67), (49, 29, 52), (36, 42, 79), (53, 70, 115),
+        (79, 107, 152), (110, 148, 183), (155, 190, 205), (199, 224, 222),
+        (81, 102, 68), (63, 73, 47), (47, 50, 34), (35, 32, 26),
+    ],
+    "steamlords": [
+        (33, 30, 51), (46, 53, 77), (62, 79, 92), (92, 108, 93),
+        (143, 151, 117), (194, 195, 148), (219, 214, 167), (238, 235, 195),
+        (84, 51, 68), (127, 72, 75), (171, 104, 78), (207, 144, 85),
+        (230, 187, 106), (243, 222, 138), (255, 250, 172), (255, 255, 215),
+    ],
+    "journey": [
+        (5, 5, 15), (18, 18, 36), (36, 36, 56), (58, 60, 83),
+        (82, 89, 113), (117, 125, 143), (164, 170, 182), (218, 224, 234),
+        (254, 254, 254), (190, 119, 43), (245, 179, 66), (255, 235, 148),
+        (255, 248, 207), (162, 59, 55), (216, 91, 80), (251, 147, 102),
+        (248, 200, 158), (46, 56, 88), (57, 85, 119), (77, 125, 153),
+        (109, 172, 186), (158, 215, 213), (189, 232, 223), (42, 69, 61),
+        (56, 100, 76), (80, 141, 94), (130, 182, 115), (185, 214, 144),
+        (217, 235, 180), (102, 42, 67), (143, 57, 93), (186, 80, 117),
+        (221, 128, 156), (241, 179, 191), (253, 217, 219),
+    ],
 }
 
 
@@ -213,6 +295,24 @@ def pixelize(img: Image.Image, target_size: int = 64, num_colors: int = 0,
 
     result = reduce_palette(small, num_colors, palette_name, dither)
     return result
+
+
+def make_gif(frames: list[Image.Image], fps: int = 8, loop: int = 0) -> bytes:
+    """Create animated GIF from frames. Returns GIF bytes."""
+    import io
+    buf = io.BytesIO()
+    duration_ms = max(20, 1000 // fps)  # GIF minimum frame duration is ~20ms
+    frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:],
+                   duration=duration_ms, loop=loop, disposal=2)
+    return buf.getvalue()
+
+
+def save_gif(frames: list[Image.Image], output: Path, fps: int = 8) -> Path:
+    """Save animated GIF to file."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    gif_bytes = make_gif(frames, fps)
+    output.write_bytes(gif_bytes)
+    return output
 
 
 def make_spritesheet(frames: list[Image.Image], columns: int = 4) -> Image.Image:
@@ -364,6 +464,29 @@ def cmd_animate(args):
                 frame_size=list(frames[0].size))
 
 
+def cmd_gif(args):
+    """Create animated GIF from sprite sheet or frame directory."""
+    if args.input_dir:
+        frames = []
+        for fp in sorted(Path(args.input_dir).glob("*.png")):
+            frames.append(Image.open(fp).convert("RGBA"))
+    elif args.sheet:
+        sheet = Image.open(args.sheet).convert("RGBA")
+        frames = extract_frames(sheet, args.columns, args.rows)
+    else:
+        result_json(False, error="Provide --input-dir or --sheet")
+        sys.exit(1)
+
+    if not frames:
+        result_json(False, error="No frames found")
+        sys.exit(1)
+
+    output = Path(args.output)
+    save_gif(frames, output, args.fps)
+    print(f"Saved GIF: {output} ({len(frames)} frames, {args.fps} FPS)", file=sys.stderr)
+    result_json(True, path=output, frames=len(frames), fps=args.fps)
+
+
 def cmd_palettes(args):
     """List available palettes."""
     for name, colors in PALETTES.items():
@@ -432,6 +555,16 @@ def main():
     p.add_argument("--rows", type=int, required=True)
     p.add_argument("-o", "--output-dir", required=True)
     p.set_defaults(func=cmd_animate)
+
+    # gif
+    p = sub.add_parser("gif", help="Create animated GIF from frames or sprite sheet")
+    p.add_argument("--input-dir", help="Directory of PNG frames")
+    p.add_argument("--sheet", help="Sprite sheet PNG")
+    p.add_argument("--columns", type=int, default=4)
+    p.add_argument("--rows", type=int, default=4)
+    p.add_argument("--fps", type=int, default=8)
+    p.add_argument("-o", "--output", required=True)
+    p.set_defaults(func=cmd_gif)
 
     # list palettes
     p = sub.add_parser("palettes", help="List built-in palettes")
