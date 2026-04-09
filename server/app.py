@@ -36,6 +36,25 @@ SKILLS_DIR = GODOTSMITH_DIR / ".claude" / "skills"
 GAME_CLAUDE_MD = GODOTSMITH_DIR / "game_claude.md"
 TEMPLATES_DIR = GODOTSMITH_DIR / "game_templates"
 
+# Import pixel art toolkit functions for fast in-process calls (must be before STYLE_INTERVIEW_QUESTIONS)
+sys.path.insert(0, str(SKILLS_DIR / "godotsmith" / "tools"))
+try:
+    from pixel_art_toolkit import (
+        pixelize, reduce_palette, repair_pixel_grid, detect_pixel_size,
+        make_spritesheet, extract_frames, save_gif, make_gif, PALETTES as PIXEL_PALETTES,
+    )
+    PIXEL_TOOLKIT_AVAILABLE = True
+except ImportError:
+    PIXEL_TOOLKIT_AVAILABLE = False
+    PIXEL_PALETTES = {}
+
+from asset_catalog import get_catalog, search_catalog
+from pixel_art_presets import (
+    PIXEL_STYLE_PRESETS, LORA_TRIGGERS, PIXEL_RESOLUTIONS, ZIT_PIXEL_LORAS,
+    PIXEL_LORA_VARIANTS, ANIMATION_PRESETS, TILESET_PRESETS, EXTRA_PALETTES,
+    UPSCALE_FACTORS, FRAME_DURATION_OPTIONS, OUTPUT_FORMATS,
+)
+
 DEFAULT_CONFIG = {
     "projects_root": "C:/code/ai",
     "comfyui_path": "C:/code/ai/localllm_poc/ComfyUI",
@@ -3333,14 +3352,6 @@ async def regenerate_asset(request: Request):
     return JSONResponse({"error": "Unknown type"}, status_code=400)
 
 
-from asset_catalog import get_catalog, search_catalog
-from pixel_art_presets import (
-    PIXEL_STYLE_PRESETS, LORA_TRIGGERS, PIXEL_RESOLUTIONS, ZIT_PIXEL_LORAS,
-    PIXEL_LORA_VARIANTS, ANIMATION_PRESETS, TILESET_PRESETS, EXTRA_PALETTES,
-    UPSCALE_FACTORS, FRAME_DURATION_OPTIONS, OUTPUT_FORMATS,
-)
-
-
 def resolve_pixel_lora(lora_key: str, available_loras: list[str] | None = None) -> str:
     """Resolve a pixel LoRA key to an actual filename available in ComfyUI.
     Checks PIXEL_LORA_VARIANTS for all known filenames, returns first match."""
@@ -3352,16 +3363,7 @@ def resolve_pixel_lora(lora_key: str, available_loras: list[str] | None = None) 
                 return variant
     return ZIT_PIXEL_LORAS.get(lora_key, "")
 
-# Import pixel art toolkit functions for fast in-process calls
-sys.path.insert(0, str(SKILLS_DIR / "godotsmith" / "tools"))
-try:
-    from pixel_art_toolkit import (
-        pixelize, reduce_palette, repair_pixel_grid, detect_pixel_size,
-        make_spritesheet, extract_frames, save_gif, make_gif, PALETTES as PIXEL_PALETTES,
-    )
-    PIXEL_TOOLKIT_AVAILABLE = True
-except ImportError:
-    PIXEL_TOOLKIT_AVAILABLE = False
+# (pixel art toolkit imported near top of file, before STYLE_INTERVIEW_QUESTIONS)
 
 # User custom styles storage
 CUSTOM_STYLES_PATH = Path(__file__).parent / "pixel_custom_styles.json"

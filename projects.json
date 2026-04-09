@@ -1,5 +1,15 @@
 [
   {
+    "name": "Cigs and Dreams",
+    "path": "C:\\code\\ai\\game dev\\cigs-and-dreams",
+    "engine": "godot",
+    "genre": "Top-Down RPG, picture baldurs gate mixed with Sega Genesis shadowrun and disco elysium.",
+    "concept": "Noir detective game, multiplayer, true detective vibes and style, similar look and feel to disco elysium. I want dark and mature themes, serial killers, long murders, you're a murder cop - dark like true detective. New crimes can be entered into the game and created as dlc. Multiplayer - 2 players can work together. Good info, evidence gathering to make the game hard and very involved. Snatcher style as well - but 2 player. Or look at shadowrun on the genesis, another great example vibe and look wise. ",
+    "style": "16-bit pixel art, SNES era",
+    "created": "2026-04-08T09:24:32.909152",
+    "last_opened": "2026-04-08T09:24:32.909169"
+  },
+  {
     "name": "New Excitebike",
     "path": "C:\\code\\ai\\game dev\\new-excitebike",
     "engine": "godot",
