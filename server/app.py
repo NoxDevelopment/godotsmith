@@ -35,6 +35,8 @@ PROJECTS_FILE = GODOTSMITH_DIR / "projects.json"
 SKILLS_DIR = GODOTSMITH_DIR / ".claude" / "skills"
 GAME_CLAUDE_MD = GODOTSMITH_DIR / "game_claude.md"
 TEMPLATES_DIR = GODOTSMITH_DIR / "game_templates"
+TUTORIALS_DIR = GODOTSMITH_DIR / "memory" / "tutorials"
+TUTORIAL_JOBS: dict = {}  # job_id -> {"status": "running|done|error", "message": str, "path": str}
 
 # Import pixel art toolkit functions for fast in-process calls (must be before STYLE_INTERVIEW_QUESTIONS)
 sys.path.insert(0, str(SKILLS_DIR / "godotsmith" / "tools"))
@@ -3778,6 +3780,600 @@ def _get_local_ip() -> str:
         return ip
     except Exception:
         return "localhost"
+
+
+# --- Tutorial Ingestion + Distillation ---
+
+DISTILL_PROMPT = """You are compressing a game-dev tutorial transcript into an actionable pattern summary for a Godot game-generation agent.
+
+The transcript is likely noisy (auto-transcribed speech). Extract ONLY concrete, implementable lessons — ignore filler, intros, and generic encouragement.
+
+Output STRICTLY in this markdown format:
+
+## Topic
+{one-line description of what this tutorial teaches — e.g. "Procedural dungeon generation using BSP trees"}
+
+## When to Apply
+{one sentence — when would an agent building a game use this? e.g. "When asked to generate a roguelike, dungeon crawler, or any game with procedurally laid-out rooms"}
+
+## Key Patterns
+- {pattern 1 — concrete technique with 1-line reasoning}
+- {pattern 2}
+- {3-6 total, no more}
+
+## Code Concepts
+{If the transcript describes specific Godot classes, node compositions, or algorithms, list them as a bullet list. Use class names verbatim (e.g. CharacterBody2D, AStar2D, RandomNumberGenerator). Omit this section if no concrete APIs are discussed.}
+
+## Gotchas
+{Any warnings, quirks, or "don't do X" advice from the tutorial. Omit if none.}
+
+Aim for ~200 words total. Be concrete. If the tutorial is too vague or off-topic for game dev, output exactly: SKIP — reason
+
+Tutorial domain: {domain}
+Tutorial title: {title}
+
+TRANSCRIPT:
+{transcript}
+"""
+
+
+async def _distill_tutorial(md_path: Path) -> dict:
+    """Use Gemini Flash to distill a tutorial into an actionable summary.
+    Returns {ok, summary, skipped, reason}. Writes `## Distilled Summary` section to the tutorial markdown."""
+    google_key = os.environ.get("GOOGLE_API_KEY", "")
+    if not google_key:
+        return {"ok": False, "error": "GOOGLE_API_KEY not set; distillation requires Gemini"}
+    if not md_path.exists():
+        return {"ok": False, "error": "tutorial not found"}
+
+    text = md_path.read_text(encoding="utf-8", errors="replace")
+    # Parse existing metadata
+    title = md_path.stem
+    domain = "generic"
+    for line in text.splitlines()[:20]:
+        if line.startswith("# "):
+            title = line[2:].strip()
+        elif line.startswith("**Domain:**"):
+            domain = line.split("**Domain:**", 1)[1].strip()
+
+    # Use only the "Full Transcript" section for distillation (the Notes section is just reformatted)
+    transcript = text
+    if "## Full Transcript" in text:
+        transcript = text.split("## Full Transcript", 1)[1]
+    # Cap at 30k chars — Gemini Flash handles this fine, avoids runaway costs
+    transcript = transcript[:30000]
+
+    prompt = DISTILL_PROMPT.format(domain=domain, title=title, transcript=transcript)
+
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={google_key}",
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=60,
+            )
+            if r.status_code != 200:
+                return {"ok": False, "error": f"Gemini error: {r.text[:300]}"}
+            data = r.json()
+            summary = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception as e:
+        return {"ok": False, "error": f"distill failed: {e}"}
+
+    if summary.startswith("SKIP"):
+        return {"ok": True, "skipped": True, "reason": summary, "summary": ""}
+
+    # Write/update `## Distilled Summary` section in the tutorial markdown
+    marker = "## Distilled Summary"
+    if marker in text:
+        # Replace existing section (everything from marker until next ## at column 0 or EOF)
+        before, _after = text.split(marker, 1)
+        # Find next top-level section after current one
+        lines_after = _after.splitlines()
+        keep_from = len(lines_after)
+        for i, line in enumerate(lines_after[1:], 1):  # skip the marker's own remainder
+            if line.startswith("## "):
+                keep_from = i
+                break
+        new_text = before + marker + "\n\n" + summary + "\n\n" + "\n".join(lines_after[keep_from:])
+    else:
+        # Insert before "## Full Transcript" or at end
+        if "## Full Transcript" in text:
+            head, tail = text.split("## Full Transcript", 1)
+            new_text = head + marker + "\n\n" + summary + "\n\n## Full Transcript" + tail
+        else:
+            new_text = text + "\n\n" + marker + "\n\n" + summary + "\n"
+    md_path.write_text(new_text, encoding="utf-8")
+    return {"ok": True, "skipped": False, "summary": summary}
+
+
+def _rebuild_tutorial_index() -> Path:
+    """Regenerate memory/tutorials/INDEX.md from every tutorial's distilled summary."""
+    TUTORIALS_DIR.mkdir(parents=True, exist_ok=True)
+    index_path = TUTORIALS_DIR / "INDEX.md"
+    entries = []
+    for md in sorted(TUTORIALS_DIR.glob("*.md")):
+        if md.name == "INDEX.md":
+            continue
+        text = md.read_text(encoding="utf-8", errors="replace")
+        title = md.stem
+        source = ""
+        domain = ""
+        for line in text.splitlines()[:20]:
+            if line.startswith("# "):
+                title = line[2:].strip()
+            elif line.startswith("**Source:**"):
+                source = line.split("**Source:**", 1)[1].strip()
+            elif line.startswith("**Domain:**"):
+                domain = line.split("**Domain:**", 1)[1].strip()
+        # Extract distilled summary if present
+        summary = ""
+        if "## Distilled Summary" in text:
+            _, after = text.split("## Distilled Summary", 1)
+            lines = after.splitlines()
+            summary_lines = []
+            for line in lines[1:]:
+                if line.startswith("## "):
+                    break
+                summary_lines.append(line)
+            summary = "\n".join(summary_lines).strip()
+        entries.append({
+            "file": md.name, "title": title, "source": source, "domain": domain, "summary": summary,
+        })
+
+    lines = [
+        "# Tutorial Index",
+        "",
+        "Auto-generated registry of ingested game-dev tutorials with distilled patterns.",
+        "Read by godot-task when a task involves patterns any of these tutorials cover.",
+        "",
+        f"**Total:** {len(entries)} tutorial(s)",
+        "",
+    ]
+    for e in entries:
+        lines.append(f"## [{e['title']}]({e['file']})")
+        lines.append("")
+        if e["source"]:
+            lines.append(f"- **Source:** {e['source']}")
+        if e["domain"]:
+            lines.append(f"- **Domain:** {e['domain']}")
+        lines.append(f"- **File:** `{e['file']}`")
+        lines.append("")
+        if e["summary"]:
+            lines.append(e["summary"])
+        else:
+            lines.append("*(Not yet distilled — run `POST /api/tutorials/distill` or use the Distill button in the UI.)*")
+        lines.append("")
+    index_path.write_text("\n".join(lines), encoding="utf-8")
+    return index_path
+
+
+def _run_tutorial_ingest(job_id: str, url: str | None, file_path: str | None,
+                         domain: str | None, model: str, auto_distill: bool = True) -> None:
+    """Background task — calls tutorial_ingest.py and updates TUTORIAL_JOBS."""
+    try:
+        TUTORIALS_DIR.mkdir(parents=True, exist_ok=True)
+        tool = SKILLS_DIR / "godotsmith" / "tools" / "tutorial_ingest.py"
+        cmd = [sys.executable, str(tool), "ingest", "--out", str(TUTORIALS_DIR), "--model", model]
+        if url:
+            cmd += ["--url", url]
+        elif file_path:
+            cmd += ["--file", file_path]
+        else:
+            TUTORIAL_JOBS[job_id] = {"status": "error", "message": "No URL or file provided", "path": ""}
+            return
+        if domain and domain != "auto":
+            cmd += ["--domain", domain]
+        TUTORIAL_JOBS[job_id] = {"status": "running", "message": "Downloading + transcribing…", "path": ""}
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        if result.returncode == 0:
+            try:
+                payload = json.loads(result.stdout.strip().splitlines()[-1])
+                out_path = payload.get("path", "")
+                TUTORIAL_JOBS[job_id] = {
+                    "status": "running", "path": out_path,
+                    "message": f"Transcribed ({payload.get('segment_count', 0)} segments). Distilling…" if auto_distill else "Done",
+                }
+                if auto_distill and out_path:
+                    # Schedule distillation in same thread (we're already off the event loop)
+                    try:
+                        import asyncio as _a
+                        _a.new_event_loop().run_until_complete(_distill_tutorial(Path(out_path)))
+                    except Exception as e:
+                        TUTORIAL_JOBS[job_id]["message"] = f"Transcribed, distill failed: {e}"
+                _rebuild_tutorial_index()
+                TUTORIAL_JOBS[job_id] = {
+                    "status": "done",
+                    "message": f"Ingested ({payload.get('segment_count', 0)} segments, domain={payload.get('domain', '?')})"
+                               + (", distilled + index updated" if auto_distill and os.environ.get("GOOGLE_API_KEY") else ""),
+                    "path": out_path,
+                }
+            except Exception:
+                TUTORIAL_JOBS[job_id] = {"status": "done", "message": "Ingested", "path": ""}
+        else:
+            err = (result.stderr or result.stdout or "Unknown error")[-1000:]
+            TUTORIAL_JOBS[job_id] = {"status": "error", "message": err, "path": ""}
+    except subprocess.TimeoutExpired:
+        TUTORIAL_JOBS[job_id] = {"status": "error", "message": "Timed out after 30 minutes", "path": ""}
+    except Exception as e:
+        TUTORIAL_JOBS[job_id] = {"status": "error", "message": str(e), "path": ""}
+
+
+@app.get("/api/tutorials")
+async def list_tutorials():
+    """List all ingested tutorials with metadata."""
+    out = []
+    if TUTORIALS_DIR.exists():
+        for md in sorted(TUTORIALS_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+            if md.name == "INDEX.md":
+                continue
+            text = md.read_text(encoding="utf-8", errors="replace")
+            title = md.stem
+            source = ""
+            domain = ""
+            duration = ""
+            has_distilled = "## Distilled Summary" in text
+            for line in text.splitlines()[:20]:
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                elif line.startswith("**Source:**"):
+                    source = line.split("**Source:**", 1)[1].strip()
+                elif line.startswith("**Domain:**"):
+                    domain = line.split("**Domain:**", 1)[1].strip()
+                elif line.startswith("**Duration:**"):
+                    duration = line.split("**Duration:**", 1)[1].strip()
+            out.append({
+                "file": md.name, "path": str(md), "title": title,
+                "source": source, "domain": domain, "duration": duration,
+                "size_kb": round(md.stat().st_size / 1024, 1),
+                "modified": md.stat().st_mtime,
+                "distilled": has_distilled,
+            })
+    index_exists = (TUTORIALS_DIR / "INDEX.md").exists()
+    return {"ok": True, "tutorials": out, "dir": str(TUTORIALS_DIR), "index_exists": index_exists}
+
+
+@app.post("/api/tutorials/ingest")
+async def ingest_tutorial(request: Request):
+    """Kick off a tutorial ingestion job (returns job_id for polling)."""
+    import asyncio as _asyncio
+    import uuid
+    body = await request.json()
+    url = body.get("url", "").strip()
+    file_path = body.get("file", "").strip()
+    domain = body.get("domain", "auto")
+    model = body.get("model", "base")
+    auto_distill = body.get("auto_distill", True)
+    if not url and not file_path:
+        return {"ok": False, "error": "Provide either url or file"}
+    job_id = uuid.uuid4().hex[:12]
+    TUTORIAL_JOBS[job_id] = {"status": "running", "message": "Starting…", "path": ""}
+    loop = _asyncio.get_event_loop()
+    loop.run_in_executor(None, _run_tutorial_ingest, job_id, url or None, file_path or None, domain, model, auto_distill)
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/api/tutorials/job/{job_id}")
+async def tutorial_job_status(job_id: str):
+    job = TUTORIAL_JOBS.get(job_id)
+    if job is None:
+        return {"ok": False, "error": "unknown job"}
+    return {"ok": True, **job}
+
+
+@app.get("/api/tutorials/content/{filename}")
+async def tutorial_content(filename: str):
+    """Return the markdown content of one tutorial."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return {"ok": False, "error": "invalid filename"}
+    md_path = TUTORIALS_DIR / filename
+    if not md_path.exists() or not md_path.is_file():
+        return {"ok": False, "error": "not found"}
+    return {"ok": True, "filename": filename, "content": md_path.read_text(encoding="utf-8", errors="replace")}
+
+
+@app.post("/api/tutorials/delete")
+async def tutorial_delete(request: Request):
+    body = await request.json()
+    filename = body.get("filename", "")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return {"ok": False, "error": "invalid filename"}
+    md_path = TUTORIALS_DIR / filename
+    if md_path.exists():
+        md_path.unlink()
+        _rebuild_tutorial_index()
+        return {"ok": True}
+    return {"ok": False, "error": "not found"}
+
+
+@app.post("/api/tutorials/distill")
+async def tutorial_distill(request: Request):
+    """Run (or re-run) distillation on one tutorial via Gemini."""
+    body = await request.json()
+    filename = body.get("filename", "")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return {"ok": False, "error": "invalid filename"}
+    md_path = TUTORIALS_DIR / filename
+    if not md_path.exists():
+        return {"ok": False, "error": "not found"}
+    result = await _distill_tutorial(md_path)
+    _rebuild_tutorial_index()
+    return result
+
+
+@app.post("/api/tutorials/reindex")
+async def tutorial_reindex():
+    """Rebuild INDEX.md from existing distilled summaries."""
+    idx = _rebuild_tutorial_index()
+    return {"ok": True, "index": str(idx)}
+
+
+@app.post("/api/tutorials/promote")
+async def tutorial_promote(request: Request):
+    """Promote a tutorial's distilled summary into a named skill file under
+    .claude/skills/godot-task/tutorials/. The task executor can then treat
+    it as a first-class reference, loaded when relevant."""
+    body = await request.json()
+    filename = body.get("filename", "")
+    slug = body.get("slug", "").strip().replace(" ", "_").lower()
+    if "/" in filename or "\\" in filename or ".." in filename or not slug:
+        return {"ok": False, "error": "invalid filename or slug"}
+    if not all(c.isalnum() or c in "_-" for c in slug):
+        return {"ok": False, "error": "slug must be alphanumeric/_/- only"}
+    md_path = TUTORIALS_DIR / filename
+    if not md_path.exists():
+        return {"ok": False, "error": "tutorial not found"}
+    text = md_path.read_text(encoding="utf-8", errors="replace")
+    if "## Distilled Summary" not in text:
+        return {"ok": False, "error": "tutorial not yet distilled — distill first"}
+    _, after = text.split("## Distilled Summary", 1)
+    lines = after.splitlines()
+    summary_lines = []
+    for line in lines[1:]:
+        if line.startswith("## "):
+            break
+        summary_lines.append(line)
+    summary = "\n".join(summary_lines).strip()
+
+    # Parse title for the header
+    title = md_path.stem
+    source = ""
+    for line in text.splitlines()[:10]:
+        if line.startswith("# "):
+            title = line[2:].strip()
+        elif line.startswith("**Source:**"):
+            source = line.split("**Source:**", 1)[1].strip()
+
+    skill_dir = SKILLS_DIR / "godot-task" / "tutorials"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_path = skill_dir / f"{slug}.md"
+    out = [
+        f"# {title}",
+        "",
+        f"**Source:** {source}" if source else "",
+        f"**Origin:** Promoted from `memory/tutorials/{filename}`",
+        "",
+        summary,
+        "",
+        "---",
+        f"*See `memory/tutorials/{filename}` for the full transcript and timestamps.*",
+    ]
+    skill_path.write_text("\n".join(l for l in out if l is not None), encoding="utf-8")
+    return {"ok": True, "skill_path": str(skill_path), "slug": slug}
+
+
+@app.get("/api/tutorials/check")
+async def tutorial_check():
+    """Report whether yt-dlp + faster-whisper are installed + Gemini available for distillation."""
+    deps = {}
+    for mod in ["yt_dlp", "faster_whisper"]:
+        try:
+            __import__(mod)
+            deps[mod] = True
+        except ImportError:
+            deps[mod] = False
+    gemini_ok = bool(os.environ.get("GOOGLE_API_KEY"))
+    return {
+        "ok": all(deps.values()),
+        "deps": deps,
+        "gemini_configured": gemini_ok,
+        "install_cmd": "pip install yt-dlp faster-whisper" if not all(deps.values()) else "",
+    }
+
+
+
+# ==========================================================================
+# Noxdev Studio integration endpoints
+# --------------------------------------------------------------------------
+# Thin wrappers over existing logic, returning the {ok, data} | {ok: false, error}
+# envelope that Noxdev Studio's GodotsmithHttpClient expects.
+# See: C:\code\ai\Noxdev-Studio\packages\providers\src\godotsmith.ts
+# ==========================================================================
+
+SERVER_START_TS = time.time()
+BUILD_JOBS: dict = {}  # buildId -> {status, artifactPath?, startedAt, finishedAt?}
+
+
+def _nox_ok(data):
+    return {"ok": True, "data": data}
+
+
+def _nox_err(code: str, message: str, status: int = 500):
+    return JSONResponse(
+        {"ok": False, "error": {"code": code, "message": message}},
+        status_code=status,
+    )
+
+
+def _slug_to_project(slug: str) -> dict | None:
+    """Resolve a Noxdev project slug to a godotsmith project entry."""
+    projects = load_projects()
+    slug_norm = slug.strip().lower()
+    for p in projects:
+        name = str(p.get("name", "")).strip().lower()
+        dir_name = Path(p["path"]).name.lower()
+        if slug_norm in (name, dir_name, dir_name.replace("-", "").replace("_", "")):
+            return p
+        if slug_norm == name.replace(" ", "-"):
+            return p
+    return None
+
+
+def _detect_engine(path: str) -> dict:
+    """Single-directory engine detection. Mirrors scan_projects logic."""
+    d = Path(path)
+    if not d.exists() or not d.is_dir():
+        raise ValueError(f"Not a directory: {path}")
+
+    godot_file = d / "project.godot"
+    unity_dir = d / "ProjectSettings"
+    unreal_files = list(d.glob("*.uproject"))
+
+    if godot_file.exists():
+        name = None
+        version = None
+        main_scene = None
+        for line in godot_file.read_text(errors="ignore").splitlines():
+            if line.startswith("config/name="):
+                name = line.split("=", 1)[1].strip().strip('"')
+            elif line.startswith("application/config/name="):
+                name = name or line.split("=", 1)[1].strip().strip('"')
+            elif line.startswith("config_version="):
+                version = f"config_version={line.split('=', 1)[1].strip()}"
+            elif line.startswith("run/main_scene="):
+                main_scene = line.split("=", 1)[1].strip().strip('"')
+        return {
+            "engine": "GODOT",
+            "name": name,
+            "version": version,
+            "configPath": "project.godot",
+            "mainScene": main_scene,
+        }
+
+    if unity_dir.exists() and unity_dir.is_dir():
+        version = None
+        name = None
+        vtxt = unity_dir / "ProjectVersion.txt"
+        if vtxt.exists():
+            for line in vtxt.read_text(errors="ignore").splitlines():
+                if line.startswith("m_EditorVersion:"):
+                    version = line.split(":", 1)[1].strip()
+                    break
+        settings = unity_dir / "ProjectSettings.asset"
+        if settings.exists():
+            for line in settings.read_text(errors="ignore").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("productName:"):
+                    name = stripped.split(":", 1)[1].strip()
+                    break
+        return {
+            "engine": "UNITY",
+            "name": name,
+            "version": version,
+            "configPath": "ProjectSettings/ProjectSettings.asset",
+        }
+
+    if unreal_files:
+        up = unreal_files[0]
+        association = None
+        try:
+            association = json.loads(up.read_text()).get("EngineAssociation")
+        except Exception:
+            pass
+        return {
+            "engine": "UNREAL",
+            "name": up.stem,
+            "version": association,
+            "configPath": up.name,
+        }
+
+    raise ValueError(
+        "No engine signals found (looked for project.godot, ProjectSettings/, *.uproject)."
+    )
+
+
+@app.get("/api/health")
+async def nox_health():
+    return _nox_ok({
+        "version": "godotsmith-0.1",
+        "uptimeSec": int(time.time() - SERVER_START_TS),
+    })
+
+
+@app.get("/api/engine/detect")
+async def nox_engine_detect(path: str):
+    try:
+        data = _detect_engine(path)
+    except ValueError as e:
+        return _nox_err("invalid_input", str(e), status=400)
+    except Exception as e:  # noqa: BLE001
+        return _nox_err("upstream_error", str(e), status=500)
+    return _nox_ok(data)
+
+
+@app.get("/api/style-profile")
+async def nox_style_profile(project: str):
+    entry = _slug_to_project(project)
+    if not entry:
+        return _nox_err("not_found", f"No project registered with slug '{project}'.", status=404)
+
+    profile = load_style_profile(entry["path"])
+    profile_file = _get_style_profile_path(entry["path"])
+    return _nox_ok({
+        "id": f"sp-{Path(entry['path']).name}",
+        "projectSlug": project,
+        "answers": profile,
+        "updatedAt": datetime.fromtimestamp(profile_file.stat().st_mtime).isoformat()
+            if profile_file.exists() else None,
+    })
+
+
+@app.post("/api/build/trigger")
+async def nox_build_trigger(request: Request):
+    """Register a build intent. Actual export runs via /api/project/export
+    (which Godotsmith's UI invokes); this endpoint gives Noxdev Studio a
+    handle to track cert/release builds."""
+    data = await request.json()
+    slug = data.get("projectSlug")
+    target = (data.get("target") or "windows").lower()
+    channel = (data.get("channel") or "internal").lower()
+
+    entry = _slug_to_project(slug) if slug else None
+    if not entry:
+        return _nox_err("not_found", f"No project registered with slug '{slug}'.", status=404)
+
+    build_id = f"b-{int(time.time() * 1000)}"
+    now = datetime.now().isoformat()
+    BUILD_JOBS[build_id] = {
+        "status": "queued",
+        "startedAt": now,
+        "finishedAt": None,
+        "artifactPath": None,
+        "channel": channel,
+        "target": target,
+        "projectPath": entry["path"],
+    }
+    return _nox_ok({
+        "buildId": build_id,
+        "status": "queued",
+        "artifactPath": None,
+        "startedAt": now,
+        "finishedAt": None,
+    })
+
+
+@app.get("/api/build/{build_id}/status")
+async def nox_build_status(build_id: str):
+    job = BUILD_JOBS.get(build_id)
+    if not job:
+        return _nox_err("not_found", f"Build {build_id} not found.", status=404)
+    return _nox_ok({
+        "buildId": build_id,
+        "status": job["status"],
+        "artifactPath": job.get("artifactPath"),
+        "startedAt": job.get("startedAt"),
+        "finishedAt": job.get("finishedAt"),
+    })
 
 
 # --- Run ---
