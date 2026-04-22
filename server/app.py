@@ -3153,25 +3153,19 @@ async def batch_dialogue(request: Request):
 
 # --- API: Build/Export ---
 
-@app.post("/api/project/export")
-async def export_project(request: Request):
-    """Export a Godot project as Windows exe or HTML5."""
-    data = await request.json()
-    path = data.get("path", "")
-    target = data.get("target", "windows")  # windows, web, linux
-
+def _run_godot_export(path: str, target: str) -> dict:
+    """Run `godot --headless --export-all` for a project. Returns a structured
+    result dict. Shared by /api/project/export and /api/build/trigger."""
     cfg = load_config()
     pf = Path(path) / "project.godot"
     if not pf.exists():
-        return JSONResponse({"error": "No project.godot"}, status_code=400)
+        return {"ok": False, "error": "No project.godot"}
 
     export_dir = Path(path) / "export" / target
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check for export_presets.cfg — create if missing
     presets_file = Path(path) / "export_presets.cfg"
     if not presets_file.exists():
-        # Create minimal export presets
         presets = ""
         if target == "windows":
             presets = '''[preset.0]
@@ -3208,17 +3202,14 @@ export_path="export/linux/game.x86_64"
 '''
         presets_file.write_text(presets)
 
-    # Determine output filename
     filenames = {"windows": "game.exe", "web": "index.html", "linux": "game.x86_64"}
     output_file = export_dir / filenames.get(target, "game.exe")
 
     try:
-        # Try export — needs export templates installed in Godot
         result = subprocess.run(
             [cfg["godot_exe"], "--headless", "--export-all", "--path", path],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=300,
         )
-
         if output_file.exists():
             return {
                 "ok": True,
@@ -3226,20 +3217,33 @@ export_path="export/linux/game.x86_64"
                 "output": str(output_file),
                 "size_mb": round(output_file.stat().st_size / 1048576, 1),
             }
-
-        # Export templates might not be installed
         if "No export template" in result.stderr or "export template" in result.stderr.lower():
             return {
                 "ok": False,
                 "error": "Export templates not installed. Open Godot > Editor > Manage Export Templates > Download.",
                 "output": result.stderr[:500],
             }
-
-        return {"ok": False, "error": result.stderr[:500] or "Export failed", "output": result.stdout[:500]}
+        return {
+            "ok": False,
+            "error": result.stderr[:500] or "Export failed",
+            "output": result.stdout[:500],
+        }
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "Export timed out (120s)"}
-    except Exception as e:
+        return {"ok": False, "error": "Export timed out (300s)"}
+    except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/project/export")
+async def export_project(request: Request):
+    """Export a Godot project as Windows exe or HTML5."""
+    data = await request.json()
+    path = data.get("path", "")
+    target = data.get("target", "windows")  # windows, web, linux
+    result = _run_godot_export(path, target)
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    return result
 
 
 # --- API: Project Management ---
@@ -4328,11 +4332,29 @@ async def nox_style_profile(project: str):
     })
 
 
+def _run_build_job(build_id: str, path: str, target: str) -> None:
+    """Synchronously execute a godot export and update BUILD_JOBS in place."""
+    job = BUILD_JOBS.get(build_id)
+    if job is None:
+        return
+    job["status"] = "running"
+    result = _run_godot_export(path, target)
+    job["finishedAt"] = datetime.now().isoformat()
+    if result.get("ok"):
+        job["status"] = "succeeded"
+        job["artifactPath"] = result.get("output")
+        job["sizeMb"] = result.get("size_mb")
+    else:
+        job["status"] = "failed"
+        job["error"] = result.get("error")
+
+
 @app.post("/api/build/trigger")
 async def nox_build_trigger(request: Request):
-    """Register a build intent. Actual export runs via /api/project/export
-    (which Godotsmith's UI invokes); this endpoint gives Noxdev Studio a
-    handle to track cert/release builds."""
+    """Kick off a godot export for a registered project. Blocks on the godot
+    subprocess (bounded by _run_godot_export's timeout) so by the time this
+    returns, the job is either succeeded or failed. Noxdev Studio can still
+    poll /api/build/<id>/status to refresh the state."""
     data = await request.json()
     slug = data.get("projectSlug")
     target = (data.get("target") or "windows").lower()
@@ -4353,12 +4375,17 @@ async def nox_build_trigger(request: Request):
         "target": target,
         "projectPath": entry["path"],
     }
+
+    _run_build_job(build_id, entry["path"], target)
+    job = BUILD_JOBS[build_id]
     return _nox_ok({
         "buildId": build_id,
-        "status": "queued",
-        "artifactPath": None,
-        "startedAt": now,
-        "finishedAt": None,
+        "status": job["status"],
+        "artifactPath": job.get("artifactPath"),
+        "startedAt": job["startedAt"],
+        "finishedAt": job.get("finishedAt"),
+        "sizeMb": job.get("sizeMb"),
+        "error": job.get("error"),
     })
 
 
