@@ -51,6 +51,19 @@ except ImportError:
     PIXEL_PALETTES = {}
 
 from asset_catalog import get_catalog, search_catalog
+from godot_introspection import (
+    parse_scene as introspect_parse_scene,
+    parse_resource as introspect_parse_resource,
+    find_autoloads as introspect_find_autoloads,
+    get_dependencies as introspect_get_dependencies,
+    get_file_summaries as introspect_get_file_summaries,
+    summarize_gdscript as introspect_summarize_gdscript,
+    generate_blueprint as introspect_generate_blueprint,
+)
+from godot_web_export import (
+    run_web_export as web_run_export,
+    capture_thumbnail as web_capture_thumbnail,
+)
 from pixel_art_presets import (
     PIXEL_STYLE_PRESETS, LORA_TRIGGERS, PIXEL_RESOLUTIONS, ZIT_PIXEL_LORAS,
     PIXEL_LORA_VARIANTS, ANIMATION_PRESETS, TILESET_PRESETS, EXTRA_PALETTES,
@@ -2887,6 +2900,153 @@ async def save_file(request: Request):
         return {"ok": True, "path": str(fp)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# --- API: Godot Introspection (scene / resource / project analysis) ---
+
+
+@app.get("/api/introspect/scene")
+async def introspect_scene(file: str):
+    """Parse a .tscn and return nodes, resources, and hierarchy.
+
+    Query: ?file=<absolute-or-project-relative path to .tscn>
+    """
+    fp = Path(file)
+    if not fp.exists():
+        return JSONResponse({"error": f"Scene not found: {file}"}, status_code=404)
+    return introspect_parse_scene(fp)
+
+
+@app.get("/api/introspect/resource")
+async def introspect_resource(file: str):
+    """Parse a .tres and return metadata + resource props.
+
+    Query: ?file=<absolute path to .tres>
+    """
+    fp = Path(file)
+    if not fp.exists():
+        return JSONResponse({"error": f"Resource not found: {file}"}, status_code=404)
+    return introspect_parse_resource(fp)
+
+
+@app.get("/api/introspect/autoloads")
+async def introspect_autoloads(project: str):
+    """Return the [autoload] section of project.godot.
+
+    Query: ?project=<absolute path to project folder or project.godot>
+    """
+    return introspect_find_autoloads(Path(project))
+
+
+@app.get("/api/introspect/dependencies")
+async def introspect_dependencies(project: str, target: str):
+    """Find all files in `project` that reference `target`.
+
+    Query: ?project=<project folder>&target=<res:// path or relative path>
+    """
+    pp = Path(project)
+    if not pp.is_dir():
+        return JSONResponse({"error": f"Project not a directory: {project}"}, status_code=400)
+    return introspect_get_dependencies(pp, target)
+
+
+@app.get("/api/introspect/file-summaries")
+async def introspect_file_summaries(project: str, pattern: str = "**/*.gd"):
+    """Cheap structural summaries (class_name / extends / signals / funcs) for matching files.
+
+    Query: ?project=<project folder>&pattern=<glob, default **/*.gd>
+    """
+    pp = Path(project)
+    if not pp.is_dir():
+        return JSONResponse({"error": f"Project not a directory: {project}"}, status_code=400)
+    return introspect_get_file_summaries(pp, pattern)
+
+
+@app.get("/api/introspect/script-summary")
+async def introspect_script_summary(file: str):
+    """Summarize a single .gd file.
+
+    Query: ?file=<absolute path to .gd>
+    """
+    fp = Path(file)
+    if not fp.exists():
+        return JSONResponse({"error": f"Script not found: {file}"}, status_code=404)
+    return introspect_summarize_gdscript(fp)
+
+
+@app.post("/api/project/render-web-preview")
+async def render_web_preview(request: Request):
+    """Headless export of a Godot project to HTML5/Web. Returns the bundle path
+    + an optional thumbnail. Used by Noxdev Studio's PLAYABLE Media.kind."""
+    data = await request.json()
+    path = (data.get("path") or "").strip()
+    export_subdir = (data.get("export_subdir") or "web_export").strip() or "web_export"
+    capture_thumb = bool(data.get("capture_thumb", True))
+    timeout_s = int(data.get("timeout_s", 300))
+
+    if not path:
+        return JSONResponse({"ok": False, "error": "path is required"}, status_code=400)
+    pp = Path(path)
+    if not pp.is_dir():
+        return JSONResponse({"ok": False, "error": f"not a directory: {path}"}, status_code=400)
+    if not (pp / "project.godot").exists():
+        return JSONResponse(
+            {"ok": False, "error": f"project.godot not found at {pp}"}, status_code=400
+        )
+
+    cfg = load_config()
+    godot_exe = cfg["godot_exe"]
+
+    export_result = web_run_export(
+        project_path=pp,
+        godot_exe=godot_exe,
+        export_subdir=export_subdir,
+        timeout_s=timeout_s,
+    )
+
+    response: dict = {
+        "ok": export_result["ok"],
+        "preset_created": export_result["preset_created"],
+        "output_html": export_result["output_html"],
+        "output_dir": export_result["output_dir"],
+    }
+
+    if not export_result["ok"]:
+        response["error"] = export_result["stderr"] or "export failed"
+        response["stdout"] = export_result["stdout"]
+        return JSONResponse(response, status_code=500)
+
+    if capture_thumb and export_result["output_dir"]:
+        thumb_path = web_capture_thumbnail(
+            project_path=pp,
+            godot_exe=godot_exe,
+            output_dir=Path(export_result["output_dir"]),
+        )
+        if thumb_path:
+            response["thumbnail"] = thumb_path
+
+    return response
+
+
+@app.get("/api/introspect/blueprint")
+async def introspect_blueprint(project: str, persist: bool = False):
+    """Generate a markdown Blueprint for a Godot project.
+
+    Query: ?project=<project folder>&persist=<bool — write .ai_blueprint.md>
+    """
+    pp = Path(project)
+    if not pp.is_dir():
+        return JSONResponse({"error": f"Project not a directory: {project}"}, status_code=400)
+    md = introspect_generate_blueprint(pp)
+    result = {"markdown": md}
+    if persist:
+        target = pp / ".ai_blueprint.md"
+        try:
+            target.write_text(md, encoding="utf-8")
+            result["written"] = str(target)
+        except Exception as e:
+            result["write_error"] = str(e)
+    return result
 
 
 # --- API: GitHub Integration ---
