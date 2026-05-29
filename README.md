@@ -227,6 +227,45 @@ GET  /api/catalog                      # Curated asset catalog
 - Optional: `TRIPO3D_API_KEY` (3D model generation)
 - Optional: Kokoro TTS at localhost:8880
 
+## Development Toolchain (Skills)
+
+The repo ships two Claude skills under `.claude/skills/` that drive game generation:
+
+- **`/godotsmith`** — full pipeline orchestrator. Sub-tools (`.claude/skills/godotsmith/tools/`) cover asset generation, sprite-sheet slicing, background removal, Tripo3D, and project export. Recent additions:
+  - `build_export.py` — export to windows/web/linux/android/mac and deploy to itch.io or GitHub Pages
+  - `gdscript_lint.py` — static GDScript analysis (naming, walrus/`:=` inference bugs, missing `quit()`, signal/input mismatches; `--fix`/`--json` modes)
+  - `tutorial_ingest.py` — turn YouTube/Bilibili/local tutorial videos into timestamped markdown notes (yt-dlp + faster-whisper)
+  - Drop-in templates (`templates/`): `menu_system`, `save_system` (versioned saves + migration), `settings_system` (audio/video/accessibility/rebinding), plus `docs/GDD_TEMPLATE.md` and `docs/ADR_TEMPLATE.md`
+- **`/godot-task`** — single-task executor (generate scenes/scripts, validate headless, screenshot, visual QA). Reference docs: `coding-rules`, `code-quality`, `game-systems`, `placement`, `ui-ux`, plus a **runtime bridge** (`bridge/godotsmith_bridge.gd` autoload + `bridge_client.py`) for live inspection/control of a running game over TCP (node tree, properties, method calls, input simulation).
+
+A pre-commit hook (`.claude/hooks/pre_commit_validate.py`) blocks committing secret/credential files, oversized binaries, untagged TODO/FIXME, and tab/space-mixed GDScript.
+
+## Status
+
+Active, single-developer project on `master`. The IDE server and asset pipeline are functional and used to build real projects.
+
+**Done**
+- FastAPI Web IDE (`server/`) + `launcher.pyw` GUI: project create/open/duplicate/delete, service management, embedded console, settings, code editor (CodeMirror), GitHub integration, file browser
+- Pixel Art Studio: text/img/inpaint/animate/tileset/upscale generation, 53 style presets, 21 palettes, post-processing (pixelize/palettize/grid-repair/rembg), custom styles, LLM prompt expansion
+- Project Creative Identity (`STYLE_PROFILE.json`): 44-question interview compiling into prompt/writing/audio/character guides
+- Audio Studio: 20 SFX types, music composer, TTS with emotion tags (Kokoro/EdgeTTS/Orpheus), batch dialogue, Freesound.org search
+- Local-first asset generation via ComfyUI with cloud fallbacks; curated asset catalog
+- Godot build/export running real exports; scene/resource introspection + web export endpoints; Noxdev Studio integration endpoints
+- Generation skills: `/godotsmith` pipeline + `/godot-task` executor with runtime bridge, drop-in templates, GDScript linter, tutorial ingest, and pre-commit secret-blocking hook
+
+**In progress**
+- Hardening the godot-task runtime bridge and templates across real projects (per-project autoload install is still manual)
+- Wiring the lint/ingest/pre-commit tools into the standard generation loop
+
+**Next**
+- Broader build targets/deploy automation (android/mac/itch.io/GitHub Pages) beyond windows/web/linux
+- Tutorial-ingest registry (`memory/tutorials/INDEX.md`) populated and promoted into first-class skill patterns
+
+**Features still needed**
+- Engine coverage beyond Godot 4.6 (Unity/Unreal paths are scaffolded in the pipeline but not exercised)
+- Automated tests/CI for the server API and tools
+- Packaged install (deps, ComfyUI/Kokoro/Orpheus paths are currently hardcoded to local machine layout)
+
 ## Platform
 
 Windows-native. No xvfb/X11 dependencies. Godot runs directly with GPU.
