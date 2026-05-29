@@ -13,12 +13,20 @@ All files below are in `${CLAUDE_SKILL_DIR}/`. Load progressively — read each 
 |------|---------|--------------|
 | `quirks.md` | Known Godot gotchas and workarounds | Before writing any code |
 | `gdscript.md` | GDScript syntax reference | Before writing any code |
+| `code-quality.md` | Naming conventions, anti-patterns, signal/node validation | Before writing any code, and before `--quit` validation |
 | `scene-generation.md` | Building `.tscn` files via headless GDScript builders | Targets include `.tscn` |
 | `script-generation.md` | Writing runtime `.gd` scripts for node behavior | Targets include `.gd` |
 | `coordination.md` | Ordering scene + script generation | Targets include both `.tscn` and `.gd` |
+| `ui-ux.md` | Control nodes, menus, HUD, settings, themes, transitions | Task involves UI, menus, HUD, or Control nodes |
+| `game-systems.md` | Production patterns: save/load, inventory, combat, state machines, dialogue, economy, pooling | Task involves any of these systems |
 | `test-harness.md` | Writing `test/test_{id}.gd` verification scripts | Before writing test harness |
 | `capture.md` | Screenshot/video capture with GPU detection | Before capturing screenshots |
 | `visual-qa.md` | Automated screenshot comparison against reference | `reference.png` exists and task has visual output |
+| `runtime-bridge.md` | Live inspection / control of a running Godot game via TCP (node tree, properties, method calls, input sim, ui_map, spatial_audit) | Screenshots alone can't diagnose; need to query live state or script input sequences |
+| `placement.md` | Constraint-based placement helpers for scene builders — Poisson-disc sampling, path placement, physics-validated drops, reject-and-retry | Scene builder places multiple objects with spacing or reachability rules |
+| `coding-rules.md` | Path-scoped coding standards (gameplay/UI/core/network/test each have different rules) | Before generating code in a specific directory |
+| `tutorials/*.md` | Promoted tutorial patterns — first-class skills created by user from ingested videos | Always scan filenames at start of task; read the ones whose titles match the task |
+| `../../../memory/tutorials/INDEX.md` | Registry of ingested tutorials with distilled summaries. Each entry names the source, domain, and key patterns. | At start of each task; if any summary is relevant, read the referenced tutorial markdown for detail/timestamps |
 | `doc_api/_common.md` | Index of ~128 common Godot classes (one-line each) | Need API ref; scan to find class names |
 | `doc_api/_other.md` | Index of ~732 remaining Godot classes | Need API ref; class isn't in `_common.md` |
 | `doc_api/{ClassName}.md` | Full API reference for a single Godot class | Need API ref; look up specific class |

@@ -37,10 +37,11 @@ Patterns that Godot handles well out of the box and that a strong LLM implements
 - **AnimationPlayer / AnimationTree** — playing premade animations, blend trees, state transitions
 - **TileMap / GridMap levels** — tile-based or grid-based world building
 - **NavigationAgent** — basic pathfinding on static navmesh (dynamic obstacles make it hard — see above)
-- **UI with Control nodes** — HUD, menus, health bars, score display, pause screens
-- **Spawning, timers, waves** — enemy spawners, cooldowns, wave progression
-- **Camera follow** — smooth follow, lerp-based tracking, fixed offsets
-- **State machines, input handling** — player states, input mapping, action buffering
+- **UI with Control nodes** — HUD, menus, health bars, score display, pause screens, settings, input rebinding, dialog boxes, tooltips, toasts, scene transitions (see `ui-ux.md`)
+- **Spawning, timers, waves** — enemy spawners, cooldowns, wave progression, object pooling (see `game-systems.md`)
+- **Camera follow** — smooth follow, lerp-based tracking, fixed offsets, trauma-based shake
+- **State machines, input handling** — player states, input mapping, action buffering, coyote time, jump buffer (see `game-systems.md`)
+- **Standard game systems** — save/load, inventory with stacking, dialogue trees, loot tables, shops, quest tracking, hitbox/hurtbox combat, ability cooldowns (see `game-systems.md`)
 
 ## Output Format
 
@@ -111,7 +112,7 @@ The Verify field describes what the task's goal looks like when achieved — the
 ## Common Game Structures
 
 Reference these by name in task goals — the task executor knows how to implement them:
-spawn system, state machine, navigation/AI, HUD overlay, pause, turn-based combat, grid movement.
+spawn system, state machine, navigation/AI, HUD overlay, pause menu, main menu, settings menu, input rebinding, scene transitions, save/load, inventory (slot-based with stacking), dialogue tree, shop/economy, loot tables, hitbox/hurtbox combat, ability cooldowns, object pool, camera shake, coyote time, jump buffer, wave spawner, quest system, turn-based combat, grid movement, floating damage numbers, toast notifications.
 
 ## Mandatory Final Task: Presentation Video
 

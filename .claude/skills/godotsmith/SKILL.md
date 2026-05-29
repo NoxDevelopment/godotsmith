@@ -33,7 +33,36 @@ Read each sub-file from `${CLAUDE_SKILL_DIR}/` when you reach its pipeline stage
 | `rembg_matting.py` | Remove backgrounds from sprites using rembg + alpha matting | `rembg_matting.py input.png -o output.png` |
 | `spritesheet_slice.py` | Crop grid lines, split sprite sheets, remove backgrounds | `clean-bg sheet.png -o clean.png` |
 | `tripo3d.py` | Convert PNG to GLB 3D model via Tripo3D API | Used by asset_gen.py |
-| `build_export.py` | Export Godot project as Windows .exe, Web HTML5, or Linux | `export --project . --target windows` |
+| `build_export.py` | Export Godot project (windows/web/linux/android/mac) and deploy (itch.io, GitHub Pages) | `export --target windows`, `deploy itch --itch-user X --itch-game Y`, `deploy pages --push` |
+| `gdscript_lint.py` | Static analysis: naming conventions, polymorphic-walrus bugs, missing quit(), input action mismatches, signal dangling emits | `--project .` or `--file scripts/x.gd` (append `--json` for machine output) |
+| `tutorial_ingest.py` | Convert YouTube/Bilibili/local game-dev tutorial videos into timestamped markdown notes via yt-dlp + faster-whisper. Auto-detects domain (godot/unity/unreal/blender/pixelart). | `ingest --url <url> --domain godot --out memory/tutorials/` |
+
+## Drop-in Templates (`${CLAUDE_SKILL_DIR}/templates/`)
+
+Production-ready system scaffolding. Copy wholesale into a project rather than regenerating:
+
+| Template | Contents |
+|----------|----------|
+| `menu_system/` | Main menu + pause menu (scene builder + scripts) |
+| `save_system/` | `SaveManager` autoload — versioned saves, autosave, migration |
+| `settings_system/` | `SettingsManager` autoload — audio buses, video, accessibility, rebinding persistence |
+| `docs/GDD_TEMPLATE.md` | Game Design Document skeleton — concept, loop, mechanics, progression, win/lose, characters, controls, edge cases |
+| `docs/ADR_TEMPLATE.md` | Architecture Decision Record — context, decision, alternatives, consequences, follow-ups |
+
+See `templates/README.md` for conventions and usage.
+
+## Pre-Commit Hook
+
+`.claude/hooks/pre_commit_validate.py` — runs before `git commit` to catch:
+- Banned files (`.env`, credentials, private keys)
+- Binaries >10MB
+- TODO/FIXME without `(owner)` tag
+- Mixed tabs/spaces in `.gd` files
+
+Wire up via `.claude/settings.json`:
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "python .claude/hooks/pre_commit_validate.py"}]}]}}
+```
 
 ## Audio Generation Priority Chain
 

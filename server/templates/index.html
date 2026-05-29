@@ -51,6 +51,9 @@
             <div class="nav-item" onclick="showPage('console')">
                 <span class="icon">&#9000;</span><span>Console</span>
             </div>
+            <div class="nav-item" onclick="showPage('tutorials')">
+                <span class="icon">&#9775;</span><span>Tutorials</span>
+            </div>
             <div class="nav-item" onclick="showPage('settings')">
                 <span class="icon">&#9881;</span><span>Settings</span>
             </div>
@@ -637,6 +640,99 @@
             </div>
         </div>
 
+        <!-- Tutorials Page -->
+        <div class="page" id="page-tutorials">
+            <div class="page-header">Tutorials</div>
+            <div class="page-subheader">
+                Paste a YouTube/Bilibili URL or local file path. The tutorial is transcribed with faster-whisper
+                and saved as timestamped markdown in <code id="tut-dir-hint" style="opacity:0.8;">memory/tutorials/</code> for
+                future game generations to reference.
+            </div>
+
+            <div id="tut-deps-warn" style="display:none; margin-bottom:12px; padding:10px; background:#2a1a10; border:1px solid var(--red); border-radius:var(--radius); font-size:13px;"></div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+                    <div style="font-weight:600; margin-bottom:12px;">Ingest a Tutorial</div>
+                    <div class="form-group">
+                        <label>YouTube / Bilibili URL</label>
+                        <input class="form-input" id="tut-url" placeholder="https://www.youtube.com/watch?v=...">
+                    </div>
+                    <div style="text-align:center; opacity:0.5; font-size:12px; margin:8px 0;">— or —</div>
+                    <div class="form-group">
+                        <label>Local File Path (video or audio)</label>
+                        <input class="form-input" id="tut-file" placeholder="C:/path/to/video.mp4">
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                        <div class="form-group">
+                            <label>Domain</label>
+                            <select class="form-input" id="tut-domain">
+                                <option value="auto">Auto-detect</option>
+                                <option value="godot" selected>Godot</option>
+                                <option value="unity">Unity</option>
+                                <option value="unreal">Unreal</option>
+                                <option value="blender">Blender</option>
+                                <option value="pixelart">Pixel Art</option>
+                                <option value="generic">Generic</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Whisper Model</label>
+                            <select class="form-input" id="tut-model">
+                                <option value="tiny">tiny (fastest)</option>
+                                <option value="base" selected>base (balanced)</option>
+                                <option value="small">small</option>
+                                <option value="medium">medium</option>
+                                <option value="large-v3">large-v3 (best)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-accent" onclick="ingestTutorial()" id="tut-ingest-btn" style="width:100%; margin-top:8px;">
+                        Ingest Tutorial
+                    </button>
+                    <div id="tut-progress" style="margin-top:12px; font-size:12px; display:none; padding:8px; background:var(--bg-dark); border-radius:4px;"></div>
+                </div>
+
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+                    <div style="font-weight:600; margin-bottom:12px;">How it's used</div>
+                    <div style="font-size:13px; line-height:1.6; opacity:0.9;">
+                        <p style="margin-top:0;"><b>Three-stage pipeline:</b></p>
+                        <ol style="padding-left:20px; margin:4px 0;">
+                            <li><b>Ingest</b> — transcribe video to <code>memory/tutorials/xxx.md</code></li>
+                            <li><b>Distill</b> — Gemini compresses transcript to a ~200-word actionable pattern summary, appended to the same file + written to <code>INDEX.md</code></li>
+                            <li><b>Promote</b> (optional) — turn the distilled summary into a first-class skill file at <code>.claude/skills/godot-task/tutorials/&lt;slug&gt;.md</code> that every task executor reads</li>
+                        </ol>
+                        <p style="margin-top:8px;">Steps 1 + 2 run automatically on ingest (if GOOGLE_API_KEY is set). Promote is manual — you decide which tutorials deserve to shape code generation.</p>
+                        <p><b>Model size guide:</b></p>
+                        <ul style="padding-left:18px; margin:4px 0;">
+                            <li><b>tiny/base</b> — fast, English-only</li>
+                            <li><b>small/medium</b> — mixed accents, technical terms</li>
+                            <li><b>large-v3</b> — multilingual, best accuracy (slow)</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:24px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="font-size:16px; font-weight:600;">Ingested Tutorials</div>
+                    <button class="btn btn-outline btn-sm" onclick="loadTutorials()">Refresh</button>
+                </div>
+                <div id="tut-list"></div>
+            </div>
+
+            <!-- Preview modal -->
+            <div id="tut-preview-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); z-index:100; overflow-y:auto;" onclick="if(event.target===this)this.style.display='none'">
+                <div style="max-width:900px; margin:40px auto; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:24px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <div id="tut-preview-title" style="font-size:18px; font-weight:600;"></div>
+                        <button class="btn btn-outline btn-sm" onclick="document.getElementById('tut-preview-modal').style.display='none'">Close</button>
+                    </div>
+                    <div id="tut-preview-body" style="max-height:70vh; overflow-y:auto; background:var(--bg-dark); padding:16px; border-radius:4px; font-family:Consolas, monospace; font-size:12px; white-space:pre-wrap;"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Settings Page -->
         <div class="page" id="page-settings">
             <div class="page-header">Settings</div>
@@ -708,6 +804,200 @@ function showPage(name) {
     if (name === 'projects') loadProjects();
     if (name === 'settings') loadSettings();
     if (name === 'new-game') loadTemplates();
+    if (name === 'tutorials') loadTutorials();
+}
+
+// --- Tutorials ---
+let tutorialPollTimer = null;
+
+async function loadTutorials() {
+    // Dep check
+    try {
+        const chk = await fetch('/api/tutorials/check').then(r => r.json());
+        const warn = document.getElementById('tut-deps-warn');
+        if (!chk.ok) {
+            const missing = Object.entries(chk.deps || {}).filter(([_, v]) => !v).map(([k]) => k).join(', ');
+            warn.style.display = 'block';
+            warn.innerHTML = `<b>Missing Python dependencies:</b> ${missing}<br><span style="opacity:0.8">Install with: <code>${chk.install_cmd}</code></span>`;
+            document.getElementById('tut-ingest-btn').disabled = true;
+        } else {
+            warn.style.display = 'none';
+            document.getElementById('tut-ingest-btn').disabled = false;
+        }
+    } catch (e) {}
+
+    // List
+    const res = await fetch('/api/tutorials').then(r => r.json());
+    const list = document.getElementById('tut-list');
+    document.getElementById('tut-dir-hint').textContent = res.dir || 'memory/tutorials/';
+    if (!res.tutorials || res.tutorials.length === 0) {
+        list.innerHTML = `<div style="opacity:0.6; padding:24px; text-align:center; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);">No tutorials ingested yet. Paste a URL above and click Ingest.</div>`;
+        return;
+    }
+    list.innerHTML = res.tutorials.map(t => {
+        const sourceLink = t.source && t.source.startsWith('http')
+            ? `<a href="${t.source}" target="_blank" style="color:var(--blue); text-decoration:none;">${t.source.substring(0, 60)}${t.source.length > 60 ? '…' : ''}</a>`
+            : (t.source || '');
+        return `
+            <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:14px; margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:600; margin-bottom:4px;">${escapeHtml(t.title)}</div>
+                        <div style="font-size:12px; opacity:0.75; margin-bottom:4px;">${sourceLink}</div>
+                        <div style="font-size:11px; opacity:0.6;">
+                            ${t.domain ? `<span style="background:var(--bg-dark); padding:2px 6px; border-radius:3px; margin-right:6px;">${escapeHtml(t.domain)}</span>` : ''}
+                            ${t.duration ? `<span>⏱ ${escapeHtml(t.duration)}</span>` : ''}
+                            <span style="margin-left:8px;">${t.size_kb} KB</span>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:4px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end;">
+                        ${t.distilled
+                            ? `<span style="background:#1a3a1a; color:#8f8; padding:2px 8px; border-radius:3px; font-size:11px; align-self:center;">✓ distilled</span>`
+                            : `<span style="background:#3a2a1a; color:#fa8; padding:2px 8px; border-radius:3px; font-size:11px; align-self:center;">not distilled</span>`}
+                        <button class="btn btn-outline btn-sm" onclick="previewTutorial('${encodeURIComponent(t.file)}')">Preview</button>
+                        <button class="btn btn-outline btn-sm" onclick="distillTutorial('${encodeURIComponent(t.file)}')" title="Run Gemini distillation">Distill</button>
+                        <button class="btn btn-outline btn-sm" onclick="promoteTutorial('${encodeURIComponent(t.file)}')" title="Promote to a skill file so godot-task uses it">Promote</button>
+                        <button class="btn btn-outline btn-sm" onclick="deleteTutorial('${encodeURIComponent(t.file)}')" style="color:var(--red);">Delete</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function ingestTutorial() {
+    const url = document.getElementById('tut-url').value.trim();
+    const file = document.getElementById('tut-file').value.trim();
+    const domain = document.getElementById('tut-domain').value;
+    const model = document.getElementById('tut-model').value;
+    if (!url && !file) {
+        alert('Provide a URL or a local file path');
+        return;
+    }
+    const btn = document.getElementById('tut-ingest-btn');
+    const prog = document.getElementById('tut-progress');
+    btn.disabled = true;
+    btn.textContent = 'Starting…';
+    prog.style.display = 'block';
+    prog.innerHTML = 'Submitting job…';
+
+    const res = await fetch('/api/tutorials/ingest', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, file, domain, model}),
+    }).then(r => r.json());
+
+    if (!res.ok) {
+        prog.innerHTML = `<span style="color:var(--red);">Error: ${escapeHtml(res.error || 'failed')}</span>`;
+        btn.disabled = false;
+        btn.textContent = 'Ingest Tutorial';
+        return;
+    }
+
+    btn.textContent = 'Ingesting…';
+    pollTutorialJob(res.job_id, btn, prog);
+}
+
+function pollTutorialJob(jobId, btn, prog) {
+    if (tutorialPollTimer) clearInterval(tutorialPollTimer);
+    let elapsed = 0;
+    tutorialPollTimer = setInterval(async () => {
+        elapsed += 2;
+        const res = await fetch(`/api/tutorials/job/${jobId}`).then(r => r.json());
+        if (!res.ok) {
+            prog.innerHTML = `<span style="color:var(--red);">Lost job status</span>`;
+            clearInterval(tutorialPollTimer);
+            btn.disabled = false;
+            btn.textContent = 'Ingest Tutorial';
+            return;
+        }
+        if (res.status === 'running') {
+            prog.innerHTML = `⏳ ${escapeHtml(res.message)} <span style="opacity:0.6;">(${elapsed}s)</span>`;
+        } else if (res.status === 'done') {
+            prog.innerHTML = `<span style="color:var(--green);">✓ ${escapeHtml(res.message)}</span>`;
+            clearInterval(tutorialPollTimer);
+            btn.disabled = false;
+            btn.textContent = 'Ingest Tutorial';
+            document.getElementById('tut-url').value = '';
+            document.getElementById('tut-file').value = '';
+            loadTutorials();
+        } else if (res.status === 'error') {
+            prog.innerHTML = `<span style="color:var(--red);">✗ ${escapeHtml(res.message)}</span>`;
+            clearInterval(tutorialPollTimer);
+            btn.disabled = false;
+            btn.textContent = 'Ingest Tutorial';
+        }
+    }, 2000);
+}
+
+async function previewTutorial(filename) {
+    const res = await fetch(`/api/tutorials/content/${filename}`).then(r => r.json());
+    if (!res.ok) {
+        alert('Failed to load: ' + (res.error || ''));
+        return;
+    }
+    document.getElementById('tut-preview-title').textContent = decodeURIComponent(filename);
+    document.getElementById('tut-preview-body').textContent = res.content;
+    document.getElementById('tut-preview-modal').style.display = 'block';
+}
+
+async function deleteTutorial(filename) {
+    if (!confirm('Delete this tutorial?')) return;
+    await fetch('/api/tutorials/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename: decodeURIComponent(filename)}),
+    });
+    loadTutorials();
+}
+
+async function distillTutorial(filename) {
+    const fname = decodeURIComponent(filename);
+    const prog = document.getElementById('tut-progress');
+    prog.style.display = 'block';
+    prog.innerHTML = `⏳ Distilling ${escapeHtml(fname)} via Gemini…`;
+    const res = await fetch('/api/tutorials/distill', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename: fname}),
+    }).then(r => r.json());
+    if (res.ok) {
+        if (res.skipped) {
+            prog.innerHTML = `<span style="color:#fa8;">⚠ Skipped: ${escapeHtml(res.reason || '')}</span>`;
+        } else {
+            prog.innerHTML = `<span style="color:var(--green);">✓ Distilled and INDEX.md updated.</span>`;
+        }
+    } else {
+        prog.innerHTML = `<span style="color:var(--red);">✗ ${escapeHtml(res.error || 'failed')}</span>`;
+    }
+    loadTutorials();
+}
+
+async function promoteTutorial(filename) {
+    const fname = decodeURIComponent(filename);
+    const slug = prompt(
+        'Promote this tutorial into a skill file (godot-task/tutorials/<slug>.md).\n' +
+        'The task executor will see it and use it when relevant.\n\n' +
+        'Skill slug (alphanumeric / _ / -):',
+        fname.replace(/\.md$/, '').replace(/[^a-z0-9_-]/gi, '_').toLowerCase().slice(0, 40)
+    );
+    if (!slug) return;
+    const res = await fetch('/api/tutorials/promote', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename: fname, slug: slug}),
+    }).then(r => r.json());
+    const prog = document.getElementById('tut-progress');
+    prog.style.display = 'block';
+    if (res.ok) {
+        prog.innerHTML = `<span style="color:var(--green);">✓ Promoted to <code>${escapeHtml(res.skill_path)}</code>. godot-task will now reference this skill.</span>`;
+    } else {
+        prog.innerHTML = `<span style="color:var(--red);">✗ ${escapeHtml(res.error || 'failed')}</span>`;
+    }
 }
 
 function showDetailTab(name) {
@@ -1161,6 +1451,16 @@ function toast(message, type = 'info') {
 let _loadingCount = 0;
 let _loadingOverlay = null;
 
+let _loadingTimer = null;
+let _loadingStart = 0;
+
+function _fmtElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m > 0 ? `${m}:${String(sec).padStart(2,'0')}` : `${sec}s`;
+}
+
 function showLoading(message = 'Working...') {
     _loadingCount++;
     if (!_loadingOverlay) {
@@ -1170,18 +1470,29 @@ function showLoading(message = 'Working...') {
         _loadingOverlay.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:24px 40px;text-align:center;">
             <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 12px;"></div>
             <div id="loading-message" style="color:var(--text);font-size:14px;">${message}</div>
+            <div id="loading-elapsed" style="color:var(--text-muted);font-size:12px;margin-top:6px;">0s</div>
         </div>`;
         document.body.appendChild(_loadingOverlay);
     } else {
         document.getElementById('loading-message').textContent = message;
         _loadingOverlay.style.display = 'flex';
     }
+    // Start or restart the elapsed timer
+    _loadingStart = Date.now();
+    if (_loadingTimer) clearInterval(_loadingTimer);
+    const elEl = document.getElementById('loading-elapsed');
+    if (elEl) elEl.textContent = '0s';
+    _loadingTimer = setInterval(() => {
+        const el = document.getElementById('loading-elapsed');
+        if (el) el.textContent = _fmtElapsed(Date.now() - _loadingStart);
+    }, 1000);
 }
 
 function hideLoading() {
     _loadingCount = Math.max(0, _loadingCount - 1);
     if (_loadingCount === 0 && _loadingOverlay) {
         _loadingOverlay.style.display = 'none';
+        if (_loadingTimer) { clearInterval(_loadingTimer); _loadingTimer = null; }
     }
 }
 
