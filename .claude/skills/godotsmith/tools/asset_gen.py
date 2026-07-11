@@ -2,8 +2,11 @@
 """Asset Generator CLI - creates images and GLBs with local-first backends.
 
 Image backends (priority order):
-  1. ComfyUI (local, FREE) — localhost:8188
-  2. Gemini (cloud, 5-15 cents) — fallback if ComfyUI unavailable
+  1. ml-workbench workflow library (local, FREE) — localhost:8787
+     Validated ComfyUI graphs routed by --type (zit-pixel-art / qwen-icon /
+     zit-txt2img / qwen-edit-instruct). Contract: ml-workbench/workflows/README.md.
+  2. ComfyUI direct (local, FREE) — localhost:8188
+  3. Gemini (cloud, 5-15 cents) — fallback if nothing local is available
 
 Subcommands:
   image        Generate a PNG from a prompt
@@ -17,6 +20,7 @@ Output: JSON to stdout. Progress to stderr.
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -75,7 +79,7 @@ def result_json(ok: bool, path: str | None = None, cost_cents: int = 0,
 
 
 # ---------------------------------------------------------------------------
-# Image generation — ComfyUI (primary) / Gemini (fallback)
+# Image generation — ml-workbench workflows (primary) / ComfyUI / Gemini
 # ---------------------------------------------------------------------------
 
 IMAGE_SIZES = ["512", "1K", "2K", "4K"]
@@ -84,6 +88,218 @@ IMAGE_ASPECT_RATIOS = [
     "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3",
     "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
 ]
+IMAGE_SIZE_PX = {"512": 512, "1K": 1024, "2K": 2048, "4K": 4096}
+
+# --- ml-workbench workflow library (primary backend) -----------------------
+# Env: MLWB_URL / ML_WORKBENCH_URL (default :8787) · MLWB_TIMEOUT (180) ·
+#      MLWB_DISABLE=1 / MLWB_WORKFLOWS_DISABLE=1 (skip) ·
+#      MLWB_WORKFLOWS_TTL (id-list cache secs, default 300).
+MLWB_URL = (
+    os.environ.get("MLWB_URL") or os.environ.get("ML_WORKBENCH_URL") or "http://localhost:8787"
+).rstrip("/")
+MLWB_TIMEOUT = float(os.environ.get("MLWB_TIMEOUT", "180"))
+MLWB_WORKFLOWS_TTL = float(os.environ.get("MLWB_WORKFLOWS_TTL", "300"))
+_MLWB_WORKFLOWS_FAIL_TTL = 60.0
+
+ASSET_TYPES = [
+    "general", "reference", "portrait", "character", "avatar", "sprite",
+    "tile", "tileset", "item", "icon", "landscape", "environment", "ui",
+]
+
+# Asset-type -> workflow-id routing (mirrors godogen image-pipeline):
+#   sprite/tile/tileset/item -> zit-pixel-art  (server-side pixel grid + quantize;
+#                               returns grid asset + 4x preview)
+#   icon/ui                  -> qwen-icon      (centered, plain background)
+#   --reference given        -> qwen-edit-instruct (identity-preserving edit)
+#   everything else          -> zit-txt2img
+WF_PIXEL_TYPES = {"sprite", "tile", "tileset", "item"}
+WF_ICON_TYPES = {"icon", "ui"}
+WF_PIXEL_WORKFLOW = "zit-pixel-art"
+WF_ICON_WORKFLOW = "qwen-icon"
+WF_TXT2IMG_WORKFLOW = "zit-txt2img"
+WF_EDIT_WORKFLOW = "qwen-edit-instruct"
+
+# Prompt prefixes per type. ZIT workflows want the pixel-LoRA trigger phrasing;
+# qwen workflows respond best to plain natural-language nudges.
+ZIT_TYPE_PROMPT_PREFIX = {
+    "portrait":    "pixel art portrait,",
+    "avatar":      "pixel art portrait,",
+    "character":   "pixel art sprite,",
+    "sprite":      "pixel art sprite,",
+    "item":        "pixel art sprite,",
+    "tile":        "pixel art tile, seamless tileable, edge-aligned,",
+    "tileset":     "pixel art tile, seamless tileable, edge-aligned,",
+    "landscape":   "pixel art scene, wide composition,",
+    "environment": "pixel art scene,",
+    "reference":   "pixel art scene, in-game screenshot, HUD visible,",
+    "general":     "",
+}
+QWEN_TYPE_PROMPT_PREFIX = {
+    "icon": "clean game icon, centered subject, simple background,",
+    "ui":   "clean UI element, flat shading, transparent background,",
+}
+TYPE_NEGATIVE = {
+    "sprite":  "anti-aliased edges, smooth gradient, photo, 3D render, jpeg artifacts",
+    "tile":    "seam, border, visible edge",
+    "tileset": "visible seam, edge artifact",
+    "icon":    "background clutter, multiple subjects",
+    "ui":      "shadows, gradients, busy background",
+}
+
+
+def _workflow_cache_file() -> Path:
+    import tempfile
+    return Path(tempfile.gettempdir()) / "godotsmith_mlwb_workflows.json"
+
+
+def _mlwb_workflow_ids():
+    """Set of workflow ids served by ml-workbench, or None when unavailable.
+    Health-checked once per batch: result cached to disk with a TTL."""
+    import time
+    import urllib.request
+
+    cache_file = _workflow_cache_file()
+    now = time.time()
+    try:
+        cached = json.loads(cache_file.read_text(encoding="utf-8"))
+        if cached.get("url") == MLWB_URL:
+            age = now - float(cached.get("ts", 0))
+            ids = cached.get("ids")
+            if ids is None and age < _MLWB_WORKFLOWS_FAIL_TTL:
+                return None
+            if ids is not None and age < MLWB_WORKFLOWS_TTL:
+                return set(ids)
+    except (OSError, ValueError):
+        pass
+
+    try:
+        with urllib.request.urlopen(f"{MLWB_URL}/v1/workflows", timeout=5) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        ids = {w["id"] for w in data.get("workflows", []) if w.get("id")}
+    except Exception as e:
+        print(f"ml-workbench workflow library unreachable: {e}", file=sys.stderr)
+        ids = None
+
+    try:
+        cache_file.write_text(
+            json.dumps({"url": MLWB_URL, "ts": now, "ids": sorted(ids) if ids else None}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    return ids
+
+
+def _resolve_wh(size: str, aspect_ratio: str) -> tuple[int, int]:
+    """Map size preset + aspect string to (width, height), longest edge = size."""
+    base = IMAGE_SIZE_PX.get(size, 1024)
+    try:
+        a, b = (int(x) for x in aspect_ratio.split(":"))
+    except ValueError:
+        a = b = 1
+    if a >= b:
+        w, h = base, max(8, int(base * b / a))
+    else:
+        w, h = max(8, int(base * a / b)), base
+    return (w // 8) * 8, (h // 8) * 8
+
+
+def _try_mlwb_workflow(args) -> bool:
+    """Attempt generation via ml-workbench POST /v1/workflows/{id}/run.
+    Returns True on success; False falls through to ComfyUI/Gemini."""
+    import base64
+    import urllib.request
+
+    if getattr(args, "backend", None) in ("gemini", "comfyui"):
+        return False  # user forced a specific backend
+    if os.environ.get("MLWB_DISABLE") == "1" or os.environ.get("MLWB_WORKFLOWS_DISABLE") == "1":
+        return False
+
+    workflow_ids = _mlwb_workflow_ids()
+    if not workflow_ids:
+        return False
+
+    asset_type = getattr(args, "type", "general") or "general"
+    ref_path = getattr(args, "reference", "") or ""
+    if ref_path:
+        workflow_id = WF_EDIT_WORKFLOW
+    elif asset_type in WF_PIXEL_TYPES:
+        workflow_id = WF_PIXEL_WORKFLOW
+    elif asset_type in WF_ICON_TYPES:
+        workflow_id = WF_ICON_WORKFLOW
+    else:
+        workflow_id = WF_TXT2IMG_WORKFLOW
+    if workflow_id not in workflow_ids:
+        print(f"workflow '{workflow_id}' not served by ml-workbench, falling back",
+              file=sys.stderr)
+        return False
+
+    prefix = (ZIT_TYPE_PROMPT_PREFIX if workflow_id.startswith("zit-")
+              else QWEN_TYPE_PROMPT_PREFIX).get(asset_type, "")
+    params = {"prompt": (prefix + " " + args.prompt).strip()}
+    negative = TYPE_NEGATIVE.get(asset_type, "")
+    if negative:
+        params["negative"] = negative
+    if getattr(args, "seed", None) is not None:
+        params["seed"] = args.seed
+    if workflow_id == WF_PIXEL_WORKFLOW:
+        grid = getattr(args, "target_size", 0) or 64
+        params["grid_width"] = grid
+        params["grid_height"] = grid
+        params["preview_width"] = grid * 4
+        params["preview_height"] = grid * 4
+        if getattr(args, "colors", 0):
+            params["colors"] = args.colors
+    else:
+        width, height = _resolve_wh(getattr(args, "size", "1K"),
+                                    getattr(args, "aspect_ratio", "1:1"))
+        if workflow_id == WF_EDIT_WORKFLOW:
+            params["megapixels"] = round(max(width * height, 1) / 1_000_000, 2)
+        else:
+            params["width"] = width
+            params["height"] = height
+
+    body = {"params": params}
+    if ref_path:
+        body["images"] = {
+            "ref_image": base64.b64encode(Path(ref_path).read_bytes()).decode("ascii")
+        }
+
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Generating via ml-workbench workflow={workflow_id} "
+          f"type={asset_type} (local, FREE)...", file=sys.stderr)
+    try:
+        req = urllib.request.Request(
+            f"{MLWB_URL}/v1/workflows/{workflow_id}/run",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=MLWB_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        images_b64 = data.get("imagesBase64") or (
+            [data["imageBase64"]] if data.get("imageBase64") else [])
+        if not images_b64:
+            raise RuntimeError(f"workflow '{workflow_id}' returned no image")
+        # Multi-output contract (zit-pixel-art): index 0 = grid-size asset,
+        # index 1 = 4x nearest preview, saved alongside as *_preview.png.
+        output.write_bytes(base64.b64decode(images_b64[0]))
+        d = {"ok": True, "cost_cents": 0, "path": str(output),
+             "backend": "ml_workbench_workflow", "workflow": workflow_id,
+             "asset_type": asset_type}
+        if len(images_b64) > 1:
+            preview = output.with_name(f"{output.stem}_preview.png")
+            preview.write_bytes(base64.b64decode(images_b64[1]))
+            d["preview"] = str(preview)
+        print(f"Saved: {output}", file=sys.stderr)
+        record_spend(0, "ml_workbench")
+        print(json.dumps(d))
+        return True
+    except Exception as e:
+        print(f"ml-workbench workflow failed: {e}, falling back to ComfyUI/Gemini",
+              file=sys.stderr)
+        return False
 
 
 def _try_comfyui(args) -> bool:
@@ -175,7 +391,10 @@ def _generate_gemini(args):
 
 
 def cmd_image(args):
-    """Generate image — try ComfyUI first, fall back to Gemini."""
+    """Generate image — ml-workbench workflow library first, then ComfyUI,
+    then Gemini."""
+    if _try_mlwb_workflow(args):
+        return
     if not _try_comfyui(args):
         _generate_gemini(args)
 
@@ -343,14 +562,28 @@ def main():
     # image
     p_img = sub.add_parser("image", help="Generate a PNG image")
     p_img.add_argument("--prompt", required=True, help="Full image generation prompt")
+    p_img.add_argument("--type", choices=ASSET_TYPES, default="general",
+                       help="Asset type — routes to the right ml-workbench workflow "
+                            "(sprite/tile/tileset/item → zit-pixel-art, icon/ui → "
+                            "qwen-icon, else zit-txt2img). Default: general")
     p_img.add_argument("--size", choices=IMAGE_SIZES, default="1K",
                        help="Resolution preset. Default: 1K")
     p_img.add_argument("--aspect-ratio", choices=IMAGE_ASPECT_RATIOS, default="1:1",
                        help="Aspect ratio. Default: 1:1")
     p_img.add_argument("--backend", choices=["auto", "comfyui", "gemini"], default="auto",
-                       help="Image gen backend. Default: auto (ComfyUI first, Gemini fallback)")
+                       help="Image gen backend. Default: auto (ml-workbench workflows "
+                            "first, then ComfyUI, then Gemini)")
     p_img.add_argument("--checkpoint", default=None,
                        help="ComfyUI checkpoint model name (default: ponyRealism_v21MainVAE)")
+    p_img.add_argument("--seed", type=int, default=None,
+                       help="Deterministic seed (ml-workbench workflow path only)")
+    p_img.add_argument("--reference", default="",
+                       help="Reference image path — routes to qwen-edit-instruct "
+                            "(identity-preserving edit) on the workflow path")
+    p_img.add_argument("--target-size", type=int, default=0,
+                       help="Pixel-grid size for pixel asset types (default 64)")
+    p_img.add_argument("--colors", type=int, default=0,
+                       help="Max palette colors for pixel asset types (workflow default 32)")
     p_img.add_argument("-o", "--output", required=True, help="Output PNG path")
     p_img.set_defaults(func=cmd_image)
 

@@ -1,14 +1,26 @@
 # Asset Generator
 
-Generate PNG images and GLB 3D models from text prompts. Uses **ComfyUI (local, FREE)** as primary backend with **Gemini (cloud)** as fallback.
+Generate PNG images and GLB 3D models from text prompts. Uses the **ml-workbench workflow library (local, FREE)** as primary backend, **ComfyUI direct** second, **Gemini (cloud)** as last resort.
 
 ## Backends
 
 | Backend | Cost | Quality | Speed | When |
 |---------|------|---------|-------|------|
-| **ComfyUI** | FREE | Highest | ~10-30s | Primary — when localhost:8188 is running |
-| **Gemini** | 5-15¢ | Very good | ~5-10s | Fallback — when ComfyUI unavailable |
+| **ml-workbench workflows** | FREE | Highest (validated graphs) | ~20s-3min | Primary — when localhost:8787 serves `/v1/workflows` |
+| **ComfyUI direct** | FREE | High | ~10-30s | When ml-workbench unavailable, localhost:8188 running |
+| **Gemini** | 5-15¢ | Very good | ~5-10s | Fallback — when nothing local is available |
 | **Tripo3D** | 30-60¢ | Good | ~60-120s | 3D models only |
+
+### Workflow routing (`--type`, primary backend only)
+
+| `--type` | Workflow | Notes |
+|---|---|---|
+| `sprite`, `tile`, `tileset`, `item` | `zit-pixel-art` | Server-side pixel grid (`--target-size`, default 64) + palette quantize (`--colors`, default 32). Also writes a 4x nearest preview as `<name>_preview.png`. |
+| `icon`, `ui` | `qwen-icon` | Centered subject, plain background. |
+| any type + `--reference <img>` | `qwen-edit-instruct` | Identity-preserving instruction edit of the reference image. |
+| everything else | `zit-txt2img` | General Z-Image-Turbo generation. |
+
+`--seed` is deterministic on this backend. Availability is health-checked via `GET /v1/workflows` once per batch (cached, TTL 300s). Skip with `MLWB_DISABLE=1` or force a backend with `--backend comfyui|gemini`.
 
 ## CLI Reference
 
@@ -17,9 +29,9 @@ Tools live at `${CLAUDE_SKILL_DIR}/tools/`. Run from the project root.
 ### Generate image (FREE with ComfyUI, 5-15¢ with Gemini)
 
 ```bash
-# Auto backend (ComfyUI → Gemini fallback):
+# Auto backend (ml-workbench workflows → ComfyUI → Gemini). Pass --type for routing:
 python3 ${CLAUDE_SKILL_DIR}/tools/asset_gen.py image \
-  --prompt "the full prompt" -o assets/img/car.png
+  --type sprite --prompt "the full prompt" -o assets/img/car.png
 
 # Force ComfyUI:
 python3 ${CLAUDE_SKILL_DIR}/tools/asset_gen.py image \
@@ -34,9 +46,11 @@ python3 ${CLAUDE_SKILL_DIR}/tools/asset_gen.py image \
   --prompt "the full prompt" --checkpoint "juggernautXL_v9.safetensors" -o assets/img/car.png
 ```
 
+`--type` (default `general`): `general`, `reference`, `portrait`, `character`, `avatar`, `sprite`, `tile`, `tileset`, `item`, `icon`, `landscape`, `environment`, `ui`
 `--size` (default `1K`): `512`, `1K`, `2K`, `4K`
 `--aspect-ratio` (default `1:1`): `1:1`, `1:4`, `1:8`, `2:3`, `3:2`, `3:4`, `4:1`, `4:3`, `4:5`, `5:4`, `8:1`, `9:16`, `16:9`, `21:9`
 `--backend` (default `auto`): `auto`, `comfyui`, `gemini`
+Workflow-path only: `--seed N`, `--reference img.png`, `--target-size 64`, `--colors 32`
 
 ### List available models
 
