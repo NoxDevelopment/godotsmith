@@ -64,6 +64,12 @@ from godot_web_export import (
     run_web_export as web_run_export,
     capture_thumbnail as web_capture_thumbnail,
 )
+from publish_profiles import (
+    PUBLISH_PROFILES,
+    public_profiles as publish_public_profiles,
+    lint_project as publish_lint_project,
+)
+from export_runner import run_export as publish_run_export
 from pixel_art_presets import (
     PIXEL_STYLE_PRESETS, LORA_TRIGGERS, PIXEL_RESOLUTIONS, ZIT_PIXEL_LORAS,
     PIXEL_LORA_VARIANTS, ANIMATION_PRESETS, TILESET_PRESETS, EXTRA_PALETTES,
@@ -4702,6 +4708,86 @@ async def nox_templates_scaffold(request: Request):
         "godot": godot,
         "log": log_tail,
     })
+
+
+# --- Publishing pipeline (platform spec profiles + lint + export) ---
+# Profiles/lint live in publish_profiles.py; headless export in export_runner.py.
+# Same {ok, data} | {ok: false, error} envelope as the Studio block above.
+
+@app.get("/api/publish/profiles")
+async def nox_publish_profiles():
+    """List the publish platform spec profiles ({ok, data} envelope)."""
+    return _nox_ok({"profiles": publish_public_profiles()})
+
+
+def _resolve_publish_profile(profile_id: str):
+    """Return (profile, error_response) for a profile id from a request."""
+    profile = PUBLISH_PROFILES.get(profile_id)
+    if profile is None:
+        known = ", ".join(PUBLISH_PROFILES)
+        return None, _nox_err(
+            "not_found", f"Unknown publish profile '{profile_id}'. Known: {known}",
+            status=404,
+        )
+    return profile, None
+
+
+@app.post("/api/publish/lint")
+async def nox_publish_lint(request: Request):
+    """Lint a Godot project against a publish profile (static, no Godot run)."""
+    data = await request.json()
+    project_path = (data.get("projectPath") or "").strip()
+    profile_id = (data.get("profile") or "").strip()
+    if not project_path or not profile_id:
+        return _nox_err("invalid_input", "projectPath and profile are required.", status=400)
+
+    profile, err = _resolve_publish_profile(profile_id)
+    if err:
+        return err
+    if not Path(project_path).is_dir():
+        return _nox_err("invalid_input", f"Not a directory: {project_path}", status=400)
+
+    try:
+        result = publish_lint_project(project_path, profile)
+    except Exception as e:  # noqa: BLE001
+        return _nox_err("upstream_error", f"Lint failed: {e}")
+    return _nox_ok(result)
+
+
+@app.post("/api/publish/export")
+async def nox_publish_export(request: Request):
+    """Headless-export a Godot project for a publish profile and package it.
+
+    Blocks on the godot subprocess (bounded by export_runner's timeout), run
+    on a worker thread so the event loop stays responsive — same pattern as
+    /api/templates/scaffold. Export templates must be installed once via the
+    Godot editor; if absent this returns a clear EXPORT_TEMPLATES_MISSING
+    finding in data rather than a cryptic failure.
+    """
+    data = await request.json()
+    project_path = (data.get("projectPath") or "").strip()
+    profile_id = (data.get("profile") or "").strip()
+    out_dir = (data.get("outDir") or "").strip()
+    if not project_path or not profile_id or not out_dir:
+        return _nox_err(
+            "invalid_input", "projectPath, profile and outDir are required.", status=400
+        )
+
+    profile, err = _resolve_publish_profile(profile_id)
+    if err:
+        return err
+    if not Path(project_path).is_dir():
+        return _nox_err("invalid_input", f"Not a directory: {project_path}", status=400)
+    if not Path(out_dir).is_absolute():
+        return _nox_err("invalid_input", "outDir must be an absolute path.", status=400)
+
+    try:
+        result = await asyncio.to_thread(
+            publish_run_export, project_path, profile, out_dir
+        )
+    except Exception as e:  # noqa: BLE001
+        return _nox_err("upstream_error", f"Export failed: {e}")
+    return _nox_ok(result)
 
 
 # --- Run ---
