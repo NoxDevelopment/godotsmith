@@ -1297,7 +1297,7 @@ function selectEngine(engine) {
 }
 
 async function loadTemplates() {
-    const res = await fetch('/api/templates');
+    const res = await fetch('/api/templates/builtin');
     const templates = await res.json();
     const grid = document.getElementById('template-grid');
     grid.innerHTML = Object.entries(templates)

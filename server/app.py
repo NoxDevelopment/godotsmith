@@ -3635,9 +3635,11 @@ async def catalog_install(request: Request):
             "message": f"Open {download_url} in your browser to download (itch.io requires manual download)"}
 
 
-# --- API: Templates (built-in) ---
+# --- API: Templates (built-in prompt templates for the IDE's new-project UI) ---
+# NOTE: bare /api/templates is the Noxdev Studio genre-template endpoint
+# (godogen registry.json, {ok, data} envelope) — see the Studio integration block.
 
-@app.get("/api/templates")
+@app.get("/api/templates/builtin")
 async def get_templates():
     return GAME_TEMPLATES
 
@@ -4560,6 +4562,145 @@ async def nox_build_status(build_id: str):
         "artifactPath": job.get("artifactPath"),
         "startedAt": job.get("startedAt"),
         "finishedAt": job.get("finishedAt"),
+    })
+
+
+# --- Genre templates (godogen registry) ---
+
+GODOGEN_ROOT = Path(os.environ.get("GODOGEN_ROOT", "C:/code/ai/godogen"))
+TEMPLATE_REGISTRY = GODOGEN_ROOT / "templates" / "registry.json"
+SCAFFOLD_TOOL = GODOGEN_ROOT / "templates" / "tools" / "scaffold.py"
+# Vendoring (git clones of pinned addons) + the godot bootstrap import take
+# 1-3 minutes on a typical template; leave generous headroom.
+SCAFFOLD_TIMEOUT_S = 600
+
+
+def _load_template_registry() -> list:
+    raw = json.loads(TEMPLATE_REGISTRY.read_text(encoding="utf-8"))
+    return raw.get("templates", [])
+
+
+def _godot_for_engine_version(engine_version: str) -> str | None:
+    """Pick a godot exe matching a template's engineVersion pin.
+
+    '4.5.1-stable' prefers C:/godot4.5/Godot.exe; anything without a matching
+    versioned install dir falls back to $GODOT, then C:/godot/Godot.exe (the
+    default current-stable install). Returns None if nothing exists — the
+    scaffold then runs with --no-import semantics (scaffold.py warns and
+    enables plugins without the bootstrap import).
+    """
+    candidates = []
+    parts = (engine_version or "").split(".")
+    if len(parts) >= 2 and parts[0].isdigit():
+        mm = f"{parts[0]}.{parts[1].split('-')[0]}"
+        candidates += [
+            Path(f"C:/godot{mm}/Godot.exe"),
+            Path(f"C:/godot{mm}/GodotConsole.exe"),
+        ]
+    env_godot = os.environ.get("GODOT")
+    if env_godot:
+        candidates.append(Path(env_godot))
+    candidates.append(Path("C:/godot/Godot.exe"))
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
+@app.get("/api/templates")
+async def nox_templates():
+    """Genre-template library from godogen's registry ({ok, data} envelope).
+
+    The IDE's own built-in prompt templates moved to /api/templates/builtin.
+    """
+    if not TEMPLATE_REGISTRY.is_file():
+        return _nox_err(
+            "not_configured",
+            f"No template registry at {TEMPLATE_REGISTRY}. Set GODOGEN_ROOT.",
+            status=503,
+        )
+    try:
+        entries = _load_template_registry()
+    except Exception as e:  # noqa: BLE001
+        return _nox_err("upstream_error", f"Could not parse {TEMPLATE_REGISTRY}: {e}")
+    fields = ("id", "name", "engine", "engineVersion", "description", "status")
+    return _nox_ok({"templates": [{k: t.get(k) for k in fields} for t in entries]})
+
+
+@app.post("/api/templates/scaffold")
+async def nox_templates_scaffold(request: Request):
+    """Scaffold a godogen genre template into a new project directory.
+
+    Synchronous like /api/build/trigger: by the time this returns, the
+    scaffold has either produced a bootable project or failed. The subprocess
+    runs on a worker thread so the event loop (health checks etc.) stays
+    responsive during the 1-3 minute vendor + import."""
+    data = await request.json()
+    template_id = (data.get("templateId") or "").strip()
+    target_dir = (data.get("targetDir") or "").strip()
+    name = (data.get("name") or "").strip()
+    if not template_id or not target_dir or not name:
+        return _nox_err(
+            "invalid_input", "templateId, targetDir and name are required.", status=400
+        )
+    if not TEMPLATE_REGISTRY.is_file():
+        return _nox_err(
+            "not_configured",
+            f"No template registry at {TEMPLATE_REGISTRY}. Set GODOGEN_ROOT.",
+            status=503,
+        )
+    try:
+        entries = _load_template_registry()
+    except Exception as e:  # noqa: BLE001
+        return _nox_err("upstream_error", f"Could not parse {TEMPLATE_REGISTRY}: {e}")
+    template = next((t for t in entries if t.get("id") == template_id), None)
+    if template is None:
+        known = ", ".join(t.get("id", "?") for t in entries)
+        return _nox_err(
+            "not_found", f"Unknown template '{template_id}'. Known: {known}", status=404
+        )
+
+    target = Path(target_dir)
+    if not target.is_absolute():
+        return _nox_err("invalid_input", "targetDir must be an absolute path.", status=400)
+    if target.exists() and any(target.iterdir()):
+        return _nox_err("invalid_input", f"Target directory is not empty: {target}", status=400)
+
+    cmd = [
+        sys.executable,
+        str(SCAFFOLD_TOOL),
+        template_id,
+        str(target),
+        "--name", name,
+        "--registry", str(TEMPLATE_REGISTRY),
+    ]
+    godot = _godot_for_engine_version(template.get("engineVersion", ""))
+    if godot:
+        cmd += ["--godot", godot]
+
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run, cmd, capture_output=True, text=True, timeout=SCAFFOLD_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired:
+        return _nox_err("upstream_error", f"scaffold.py timed out after {SCAFFOLD_TIMEOUT_S}s.")
+    except Exception as e:  # noqa: BLE001
+        return _nox_err("upstream_error", f"Could not run scaffold.py: {e}")
+
+    log = ((proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")).strip()
+    log_tail = log[-4000:]
+    if proc.returncode != 0:
+        return _nox_err("upstream_error", f"scaffold.py exited {proc.returncode}:\n{log_tail}")
+    if not (target / "project.godot").is_file():
+        return _nox_err(
+            "upstream_error", f"Scaffold finished but no project.godot in {target}:\n{log_tail}"
+        )
+    return _nox_ok({
+        "projectPath": str(target),
+        "templateId": template_id,
+        "engineVersion": template.get("engineVersion"),
+        "godot": godot,
+        "log": log_tail,
     })
 
 
