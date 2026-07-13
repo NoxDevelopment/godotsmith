@@ -4633,6 +4633,59 @@ async def nox_templates():
     return _nox_ok({"templates": [{k: t.get(k) for k in fields} for t in entries]})
 
 
+@app.get("/api/templates/{template_id}")
+async def nox_template_detail(template_id: str):
+    """One genre template, in depth ({ok, data} envelope).
+
+    Where GET /api/templates returns catalog summary fields only, this returns
+    the FULL registry entry (vendoredAddons, upmPackages, primitives, systems,
+    assetPlanHints, docTemplates, validation pins, ...) plus the template's
+    TEMPLATE.md markdown and whether its skeleton directory is present — the
+    payload behind Noxdev Studio's per-template detail page.
+
+    NOTE: registered after GET /api/templates/builtin, so 'builtin' keeps
+    resolving to the IDE's built-in prompt templates, not this route.
+    """
+    if not TEMPLATE_REGISTRY.is_file():
+        return _nox_err(
+            "not_configured",
+            f"No template registry at {TEMPLATE_REGISTRY}. Set GODOGEN_ROOT.",
+            status=503,
+        )
+    try:
+        entries = _load_template_registry()
+    except Exception as e:  # noqa: BLE001
+        return _nox_err("upstream_error", f"Could not parse {TEMPLATE_REGISTRY}: {e}")
+    template = next((t for t in entries if t.get("id") == template_id), None)
+    if template is None:
+        known = ", ".join(t.get("id", "?") for t in entries)
+        return _nox_err(
+            "not_found", f"Unknown template '{template_id}'. Known: {known}", status=404
+        )
+
+    # TEMPLATE.md (registry-relative "doc" path, e.g. genres/<id>/TEMPLATE.md).
+    # A missing/unreadable doc is not an error — the entry itself still renders.
+    doc_rel = template.get("doc")
+    doc_text = None
+    if doc_rel:
+        doc_file = GODOGEN_ROOT / "templates" / doc_rel
+        if doc_file.is_file():
+            try:
+                doc_text = doc_file.read_text(encoding="utf-8")
+            except OSError:
+                doc_text = None
+
+    skeleton_rel = template.get("skeleton")
+    skeleton_present = bool(skeleton_rel) and (GODOGEN_ROOT / "templates" / skeleton_rel).is_dir()
+
+    return _nox_ok({
+        "template": template,
+        "doc": doc_text,
+        "docPath": doc_rel,
+        "skeletonPresent": skeleton_present,
+    })
+
+
 @app.post("/api/templates/scaffold")
 async def nox_templates_scaffold(request: Request):
     """Scaffold a godogen genre template into a new project directory.
