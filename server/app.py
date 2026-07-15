@@ -4576,6 +4576,10 @@ async def nox_build_status(build_id: str):
 GODOGEN_ROOT = Path(os.environ.get("GODOGEN_ROOT", "C:/code/ai/godogen"))
 TEMPLATE_REGISTRY = GODOGEN_ROOT / "templates" / "registry.json"
 SCAFFOLD_TOOL = GODOGEN_ROOT / "templates" / "tools" / "scaffold.py"
+# Unity analogue of scaffold.py: copies the skeleton, patches productName, and
+# merges the registry's pinned UPM packages into Packages/manifest.json. Picked
+# per the template's engine so the Godot path is never disturbed.
+SCAFFOLD_UNITY_TOOL = GODOGEN_ROOT / "templates" / "tools" / "scaffold_unity.py"
 # Vendoring (git clones of pinned addons) + the godot bootstrap import take
 # 1-3 minutes on a typical template; leave generous headroom.
 SCAFFOLD_TIMEOUT_S = 600
@@ -4725,38 +4729,70 @@ async def nox_templates_scaffold(request: Request):
     if target.exists() and any(target.iterdir()):
         return _nox_err("invalid_input", f"Target directory is not empty: {target}", status=400)
 
-    cmd = [
-        sys.executable,
-        str(SCAFFOLD_TOOL),
-        template_id,
-        str(target),
-        "--name", name,
-        "--registry", str(TEMPLATE_REGISTRY),
-    ]
-    godot = _godot_for_engine_version(template.get("engineVersion", ""))
-    if godot:
-        cmd += ["--godot", godot]
+    # Branch on the template's engine. Unity templates run scaffold_unity.py and
+    # are verified by ProjectSettings/ProjectVersion.txt; everything else runs
+    # the existing scaffold.py + project.godot path, byte-for-byte unchanged.
+    engine = (template.get("engine") or "godot").strip().lower()
+    godot = None
+
+    if engine == "unity":
+        tool = SCAFFOLD_UNITY_TOOL
+        tool_name = "scaffold_unity.py"
+        # --no-validate: the endpoint's job is the file-level scaffold (copy
+        # skeleton, patch productName, merge pinned UPM packages), the Unity
+        # analogue of "project.godot present". Unity batchmode validation is a
+        # multi-minute, license-gated editor import — unfit for a synchronous
+        # create request, and it would make this endpoint fragile exactly where
+        # the Godot path is robust. Validation stays available by running
+        # scaffold_unity.py directly (it validates by default). The first open
+        # in Unity Hub resolves UPM packages and builds the demo scene.
+        cmd = [
+            sys.executable,
+            str(tool),
+            template_id,
+            str(target),
+            "--name", name,
+            "--registry", str(TEMPLATE_REGISTRY),
+            "--no-validate",
+        ]
+        marker = "ProjectSettings/ProjectVersion.txt"
+    else:
+        tool = SCAFFOLD_TOOL
+        tool_name = "scaffold.py"
+        cmd = [
+            sys.executable,
+            str(tool),
+            template_id,
+            str(target),
+            "--name", name,
+            "--registry", str(TEMPLATE_REGISTRY),
+        ]
+        godot = _godot_for_engine_version(template.get("engineVersion", ""))
+        if godot:
+            cmd += ["--godot", godot]
+        marker = "project.godot"
 
     try:
         proc = await asyncio.to_thread(
             subprocess.run, cmd, capture_output=True, text=True, timeout=SCAFFOLD_TIMEOUT_S
         )
     except subprocess.TimeoutExpired:
-        return _nox_err("upstream_error", f"scaffold.py timed out after {SCAFFOLD_TIMEOUT_S}s.")
+        return _nox_err("upstream_error", f"{tool_name} timed out after {SCAFFOLD_TIMEOUT_S}s.")
     except Exception as e:  # noqa: BLE001
-        return _nox_err("upstream_error", f"Could not run scaffold.py: {e}")
+        return _nox_err("upstream_error", f"Could not run {tool_name}: {e}")
 
     log = ((proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")).strip()
     log_tail = log[-4000:]
     if proc.returncode != 0:
-        return _nox_err("upstream_error", f"scaffold.py exited {proc.returncode}:\n{log_tail}")
-    if not (target / "project.godot").is_file():
+        return _nox_err("upstream_error", f"{tool_name} exited {proc.returncode}:\n{log_tail}")
+    if not (target / marker).is_file():
         return _nox_err(
-            "upstream_error", f"Scaffold finished but no project.godot in {target}:\n{log_tail}"
+            "upstream_error", f"Scaffold finished but no {marker} in {target}:\n{log_tail}"
         )
     return _nox_ok({
         "projectPath": str(target),
         "templateId": template_id,
+        "engine": engine,
         "engineVersion": template.get("engineVersion"),
         "godot": godot,
         "log": log_tail,
